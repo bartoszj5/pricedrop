@@ -1,0 +1,120 @@
+services:
+  # --- Infrastructure ---
+  postgres:
+    image: postgres:17-alpine
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-pricedrop}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-pricedrop}
+      POSTGRES_DB: ${POSTGRES_DB:-pricedrop}
+    ports:
+      - "5432:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-pricedrop}"]
+      interval: 5s
+      retries: 5
+
+  redis:
+    image: redis:8-alpine
+    ports:
+      - "6379:6379"
+    volumes:
+      - redisdata:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      retries: 5
+
+  rabbitmq:
+    image: rabbitmq:4.2-management-alpine
+    ports:
+      - "5672:5672"
+      - "15672:15672"
+    environment:
+      RABBITMQ_DEFAULT_USER: ${RABBITMQ_USER:-guest}
+      RABBITMQ_DEFAULT_PASS: ${RABBITMQ_PASS:-guest}
+    volumes:
+      - rabbitmqdata:/var/lib/rabbitmq
+    healthcheck:
+      test: ["CMD", "rabbitmq-diagnostics", "-q", "ping"]
+      interval: 10s
+      retries: 5
+
+  # --- Services ---
+  api:
+    build: ./api
+    ports:
+      - "8000:8000"
+    environment:
+      DATABASE_URL: postgresql://${POSTGRES_USER:-pricedrop}:${POSTGRES_PASSWORD:-pricedrop}@postgres:5432/${POSTGRES_DB:-pricedrop}
+      REDIS_URL: redis://redis:6379/0
+      RABBITMQ_URL: amqp://${RABBITMQ_USER:-guest}:${RABBITMQ_PASS:-guest}@rabbitmq:5672/
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      rabbitmq:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "python -c 'import urllib.request; urllib.request.urlopen(\"http://localhost:8000/health\")'"]
+      interval: 10s
+      retries: 3
+
+  scraper:
+    build: ./scraper
+    ports:
+      - "8001:8001"
+    environment:
+      DATABASE_URL: postgresql://${POSTGRES_USER:-pricedrop}:${POSTGRES_PASSWORD:-pricedrop}@postgres:5432/${POSTGRES_DB:-pricedrop}
+      REDIS_URL: redis://redis:6379/1
+      RABBITMQ_URL: amqp://${RABBITMQ_USER:-guest}:${RABBITMQ_PASS:-guest}@rabbitmq:5672/
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      rabbitmq:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8001/health"]
+      interval: 10s
+      retries: 3
+
+  notifications:
+    build: ./notifications
+    ports:
+      - "8002:8002"
+    environment:
+      DATABASE_URL: postgresql://${POSTGRES_USER:-pricedrop}:${POSTGRES_PASSWORD:-pricedrop}@postgres:5432/${POSTGRES_DB:-pricedrop}
+      REDIS_URL: redis://redis:6379/2
+      RABBITMQ_URL: amqp://${RABBITMQ_USER:-guest}:${RABBITMQ_PASS:-guest}@rabbitmq:5672/
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      rabbitmq:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "python -c 'import urllib.request; urllib.request.urlopen(\"http://localhost:8002/health\")'"]
+      interval: 10s
+      retries: 3
+
+  frontend:
+    build: ./frontend
+    ports:
+      - "3000:3000"
+    depends_on:
+      api:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "wget", "-q", "--spider", "http://localhost:3000"]
+      interval: 10s
+      retries: 3
+
+volumes:
+  pgdata:
+  redisdata:
+  rabbitmqdata:
