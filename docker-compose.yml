@@ -43,13 +43,18 @@ services:
 
   # --- Services ---
   api:
-    build: ./api
+    build:
+      context: .
+      dockerfile: api/Dockerfile
     ports:
       - "8000:8000"
+    volumes:
+      - ./shared:/app/shared
     environment:
       DATABASE_URL: postgresql://${POSTGRES_USER:-pricedrop}:${POSTGRES_PASSWORD:-pricedrop}@postgres:5432/${POSTGRES_DB:-pricedrop}
       REDIS_URL: redis://redis:6379/0
       RABBITMQ_URL: amqp://${RABBITMQ_USER:-guest}:${RABBITMQ_PASS:-guest}@rabbitmq:5672/
+      PYTHONPATH: /app
     depends_on:
       postgres:
         condition: service_healthy
@@ -83,13 +88,18 @@ services:
       retries: 3
 
   notifications:
-    build: ./notifications
+    build:
+      context: .
+      dockerfile: notifications/Dockerfile
     ports:
       - "8002:8002"
+    volumes:
+      - ./shared:/app/shared
     environment:
       DATABASE_URL: postgresql://${POSTGRES_USER:-pricedrop}:${POSTGRES_PASSWORD:-pricedrop}@postgres:5432/${POSTGRES_DB:-pricedrop}
       REDIS_URL: redis://redis:6379/2
       RABBITMQ_URL: amqp://${RABBITMQ_USER:-guest}:${RABBITMQ_PASS:-guest}@rabbitmq:5672/
+      PYTHONPATH: /app
     depends_on:
       postgres:
         condition: service_healthy
