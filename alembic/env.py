@@ -5,7 +5,7 @@ from alembic import context
 from sqlalchemy import engine_from_config, pool
 from sqlmodel import SQLModel
 
-from shared.models import Alert, Game, Price, PriceHistory, Store, User  # noqa: F401
+from shared.models import Alert, Price, PriceHistory, Product, Store, User  # noqa: F401
 
 config = context.config
 

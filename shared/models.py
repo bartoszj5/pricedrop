@@ -4,15 +4,16 @@ from decimal import Decimal
 from sqlmodel import Field, Relationship, SQLModel, UniqueConstraint
 
 
-# --- Game ---
+# --- Product ---
 
 
-class Game(SQLModel, table=True):
-    __tablename__ = "games"
+class Product(SQLModel, table=True):
+    __tablename__ = "products"
 
     id: int | None = Field(default=None, primary_key=True)
     title: str = Field(max_length=255, index=True)
     slug: str = Field(max_length=255, unique=True, index=True)
+    category: str = Field(max_length=50, index=True)
     description: str | None = Field(default=None)
     image_url: str | None = Field(default=None, max_length=512)
     release_date: datetime | None = Field(default=None)
@@ -23,8 +24,8 @@ class Game(SQLModel, table=True):
         default_factory=lambda: datetime.now(timezone.utc),
     )
 
-    prices: list["Price"] = Relationship(back_populates="game")
-    alerts: list["Alert"] = Relationship(back_populates="game")
+    prices: list["Price"] = Relationship(back_populates="product")
+    alerts: list["Alert"] = Relationship(back_populates="product")
 
 
 # --- Store ---
@@ -52,11 +53,11 @@ class Store(SQLModel, table=True):
 class Price(SQLModel, table=True):
     __tablename__ = "prices"
     __table_args__ = (
-        UniqueConstraint("game_id", "store_id", name="uq_price_game_store"),
+        UniqueConstraint("product_id", "store_id", name="uq_price_product_store"),
     )
 
     id: int | None = Field(default=None, primary_key=True)
-    game_id: int = Field(foreign_key="games.id", index=True)
+    product_id: int = Field(foreign_key="products.id", index=True)
     store_id: int = Field(foreign_key="stores.id", index=True)
     current_price: Decimal = Field(max_digits=10, decimal_places=2)
     currency: str = Field(default="PLN", max_length=3)
@@ -70,7 +71,7 @@ class Price(SQLModel, table=True):
         default_factory=lambda: datetime.now(timezone.utc),
     )
 
-    game: Game = Relationship(back_populates="prices")
+    product: Product = Relationship(back_populates="prices")
     store: Store = Relationship(back_populates="prices")
     history: list["PriceHistory"] = Relationship(back_populates="price")
 
@@ -119,7 +120,7 @@ class Alert(SQLModel, table=True):
 
     id: int | None = Field(default=None, primary_key=True)
     user_id: int = Field(foreign_key="users.id", index=True)
-    game_id: int = Field(foreign_key="games.id", index=True)
+    product_id: int = Field(foreign_key="products.id", index=True)
     target_price: Decimal = Field(max_digits=10, decimal_places=2)
     currency: str = Field(default="PLN", max_length=3)
     is_active: bool = Field(default=True)
@@ -129,4 +130,4 @@ class Alert(SQLModel, table=True):
     )
 
     user: User = Relationship(back_populates="alerts")
-    game: Game = Relationship(back_populates="alerts")
+    product: Product = Relationship(back_populates="alerts")
