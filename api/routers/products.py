@@ -385,26 +385,30 @@ def get_product_details(slug: str, session: SessionDep) -> ProductDetailResponse
 
     rows = session.exec(
         select(Store, Price)
-        .outerjoin(
+        .join(
             Price,
             (Price.store_id == Store.id) & (Price.product_id == product.id),
         )
-        .order_by(Store.name.asc())
+        .where(
+            Price.current_price.is_not(None),
+            Price.is_available == True,
+        )
+        .order_by(Price.current_price.asc(), Store.name.asc())
     ).all()
 
     prices = [
         ProductStorePriceRead(
-            price_id=price.id if price else None,
+            price_id=price.id,
             store_id=store.id,
             store_name=store.name,
             store_slug=store.slug,
             store_url=store.url,
             store_logo_url=store.logo_url,
-            current_price=price.current_price if price else None,
-            currency=price.currency if price else None,
-            product_url=price.url if price else None,
-            is_available=price.is_available if price else None,
-            last_checked_at=price.last_checked_at if price else None,
+            current_price=price.current_price,
+            currency=price.currency,
+            product_url=price.url,
+            is_available=price.is_available,
+            last_checked_at=price.last_checked_at,
         )
         for store, price in rows
     ]

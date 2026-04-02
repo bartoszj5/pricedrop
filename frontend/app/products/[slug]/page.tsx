@@ -48,9 +48,6 @@ export default async function ProductDetailPage({ params }: PageProps) {
   const availablePrices = prices.filter(
     (p) => p.current_price != null && p.is_available,
   );
-  const trackedWithoutOffer = prices.filter(
-    (p) => p.current_price == null || !p.is_available,
-  );
   const cheapest = availablePrices.sort(
     (a, b) => (a.current_price ?? 0) - (b.current_price ?? 0),
   )[0];
@@ -111,7 +108,7 @@ export default async function ProductDetailPage({ params }: PageProps) {
 
             <p className="max-w-2xl text-base leading-7 text-text-secondary">
               {product.description ??
-                "Produkt jest widoczny w katalogu PriceDrop i może mieć zarówno aktywne oferty cenowe, jak i sklepy pozostające jeszcze wyłącznie w trybie monitoringu."}
+                "Produkt jest widoczny w katalogu PriceDrop tylko z ofertami, które mają potwierdzoną cenę i dostępność."}
             </p>
 
             <div className="grid gap-3 sm:grid-cols-3">
@@ -152,8 +149,10 @@ export default async function ProductDetailPage({ params }: PageProps) {
               <div className="section-subtle flex flex-wrap items-center gap-3 p-5">
                 <Radar className="h-5 w-5 text-accent" />
                 <span className="text-sm leading-6 text-text-secondary">
-                  Ten produkt jest już w monitoringu, ale nie ma jeszcze aktywnej
-                  oferty z potwierdzoną ceną.
+                  Ten produkt nie ma jeszcze w bazie żadnej aktywnej oferty z
+                  potwierdzoną ceną. Jeśli został zescrapowany z konkretnego
+                  sklepu, to sam rekord produktu istnieje, ale wpis ceny nie
+                  został jeszcze zapisany.
                 </span>
               </div>
             )}
@@ -239,52 +238,6 @@ export default async function ProductDetailPage({ params }: PageProps) {
         <section className="flex flex-col gap-4">
           <div className="flex flex-col gap-1">
             <span className="eyebrow">Sekcja druga</span>
-            <h2 className="text-3xl text-text-primary">Monitorowane sklepy bez ceny</h2>
-            <p className="text-sm leading-6 text-text-secondary">
-              Ta lista pokazuje, gdzie produkt jest już przygotowany do śledzenia,
-              ale jeszcze nie ma aktywnej oferty albo dostępności.
-            </p>
-          </div>
-          {trackedWithoutOffer.length > 0 ? (
-            <div className="grid gap-3 md:grid-cols-2">
-              {trackedWithoutOffer.map((price) => (
-                <article
-                  key={price.store_id}
-                  className="section-subtle flex items-start gap-4 p-4"
-                >
-                  <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-full border border-border bg-bg-card">
-                    {price.store_logo_url ? (
-                      <img
-                        src={price.store_logo_url}
-                        alt={price.store_name}
-                        className="h-6 w-6 object-contain"
-                      />
-                    ) : (
-                      <Radar className="h-5 w-5 text-accent" />
-                    )}
-                  </div>
-                  <div>
-                    <p className="text-lg text-text-primary">{price.store_name}</p>
-                    <p className="mt-1 text-sm leading-6 text-text-secondary">
-                      {price.is_available === false
-                        ? "Oferta była zarejestrowana, ale obecnie nie jest dostępna."
-                        : "Sklep jest objęty monitoringiem i czeka na pierwszy odczyt ceny."}
-                    </p>
-                  </div>
-                </article>
-              ))}
-            </div>
-          ) : (
-            <EmptyState
-              message="Wszystkie monitorowane sklepy mają aktywną ofertę"
-              detail="Dla tego produktu nie ma obecnie żadnych dodatkowych rekordów oczekujących na pierwszą cenę."
-            />
-          )}
-        </section>
-
-        <section className="flex flex-col gap-4">
-          <div className="flex flex-col gap-1">
-            <span className="eyebrow">Historia</span>
             <h2 className="text-3xl text-text-primary">Ruch cenowy</h2>
           </div>
           {history.length > 0 ? (
