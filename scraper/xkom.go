@@ -25,10 +25,21 @@ type jsonLDProduct struct {
 type jsonLDOffers struct {
 	Price         json.Number `json:"price"`
 	PriceCurrency string      `json:"priceCurrency"`
+	Availability  string      `json:"availability"`
 }
 
 type jsonLDBrand struct {
 	Name string `json:"name"`
+}
+
+// Unavailability markers in the HTML body — if any of these appear,
+// the product is considered not available for purchase.
+var unavailableMarkers = []string{
+	"Produkt wycofany",
+	"produkt wycofany",
+	"Produkt niedostępny",
+	"produkt niedostępny",
+	"Powiadom o dostępności",
 }
 
 type XKomScraper struct {
@@ -50,6 +61,7 @@ func (s *XKomScraper) StoreName() string {
 func (s *XKomScraper) ScrapeProduct(url string) (*ScrapeResult, error) {
 	var result ScrapeResult
 	var scrapeErr error
+	result.IsAvailable = true // assume available, then disprove
 
 	c := colly.NewCollector(
 		colly.AllowedDomains("www.x-kom.pl", "x-kom.pl"),
@@ -82,6 +94,30 @@ func (s *XKomScraper) ScrapeProduct(url string) (*ScrapeResult, error) {
 		log.Printf("[x-kom] Scraping: %s", r.URL.String())
 	})
 
+	// Check raw HTML body for unavailability markers.
+	c.OnResponse(func(r *colly.Response) {
+		body := string(r.Body)
+
+		// Check JSON-LD availability field (schema.org).
+		if strings.Contains(body, "OutOfStock") || strings.Contains(body, "Discontinued") {
+			result.IsAvailable = false
+		}
+
+		// Check for Polish unavailability text in the HTML.
+		for _, marker := range unavailableMarkers {
+			if strings.Contains(body, marker) {
+				log.Printf("[x-kom] Unavailable: found %q in page", marker)
+				result.IsAvailable = false
+				break
+			}
+		}
+
+		// If page has "Dodaj do koszyka" button, product is definitely available.
+		if strings.Contains(body, "Dodaj do koszyka") {
+			result.IsAvailable = true
+		}
+	})
+
 	// Extract product data from JSON-LD script tags.
 	c.OnHTML(`script[type="application/ld+json"]`, func(e *colly.HTMLElement) {
 		var raw map[string]interface{}
@@ -104,6 +140,12 @@ func (s *XKomScraper) ScrapeProduct(url string) (*ScrapeResult, error) {
 			result.Currency = "PLN"
 		}
 
+		// Check schema.org availability field if present.
+		if product.Offers.Availability != "" {
+			avail := strings.ToLower(product.Offers.Availability)
+			result.IsAvailable = strings.Contains(avail, "instock")
+		}
+
 		price, err := product.Offers.Price.Float64()
 		if err != nil {
 			log.Printf("[x-kom] failed to parse price %q: %v", product.Offers.Price, err)
@@ -111,7 +153,6 @@ func (s *XKomScraper) ScrapeProduct(url string) (*ScrapeResult, error) {
 			return
 		}
 		result.Price = price
-		result.IsAvailable = price > 0
 
 		if len(product.Image) > 0 {
 			result.ImageURL = product.Image[0]
@@ -133,7 +174,6 @@ func (s *XKomScraper) ScrapeProduct(url string) (*ScrapeResult, error) {
 			return
 		}
 		result.Price = price
-		result.IsAvailable = price > 0
 	})
 
 	c.OnHTML(`meta[property="product:price:currency"]`, func(e *colly.HTMLElement) {
@@ -153,20 +193,6 @@ func (s *XKomScraper) ScrapeProduct(url string) (*ScrapeResult, error) {
 			parts := strings.SplitN(content, " - ", 2)
 			result.ProductName = strings.TrimSpace(parts[0])
 		}
-	})
-
-	c.OnResponse(func(r *colly.Response) {
-		body := string(r.Body)
-		log.Printf("[x-kom] HTTP %d, body: %d bytes, has ld+json: %v, has og:title: %v",
-			r.StatusCode, len(body),
-			strings.Contains(body, "application/ld+json"),
-			strings.Contains(body, "og:title"))
-		// Log first 500 chars to see what we're getting.
-		preview := body
-		if len(preview) > 500 {
-			preview = preview[:500]
-		}
-		log.Printf("[x-kom] Body preview: %s", preview)
 	})
 
 	c.OnError(func(r *colly.Response, err error) {
