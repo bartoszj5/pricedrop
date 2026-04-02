@@ -9,8 +9,10 @@ __pycache__/
 # Node
 node_modules/
 dist/
+.next/
 
 # IDE
 .idea/
 .vscode/
 *.swp
+
