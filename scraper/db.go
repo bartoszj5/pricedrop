@@ -165,3 +165,66 @@ func (db *DB) MarkChecked(priceID int) error {
 	`, now, priceID)
 	return err
 }
+
+// ---------------------------------------------------------------------------
+// Crawler helpers
+// ---------------------------------------------------------------------------
+
+// GetStoreBySlug returns a store record by its slug.
+func (db *DB) GetStoreBySlug(slug string) (*Store, error) {
+	var s Store
+	err := db.conn.QueryRow(`
+		SELECT id, name, slug, url, logo_url, is_active, created_at
+		FROM stores WHERE slug = $1
+	`, slug).Scan(&s.ID, &s.Name, &s.Slug, &s.URL, &s.LogoURL, &s.IsActive, &s.CreatedAt)
+	if err != nil {
+		return nil, fmt.Errorf("getting store %s: %w", slug, err)
+	}
+	return &s, nil
+}
+
+// PriceExistsByURL checks whether a price record with the given product URL already exists.
+func (db *DB) PriceExistsByURL(url string) (bool, error) {
+	var exists bool
+	err := db.conn.QueryRow(`SELECT EXISTS(SELECT 1 FROM prices WHERE url = $1)`, url).Scan(&exists)
+	return exists, err
+}
+
+// UpsertProductAndPrice inserts a product (or finds an existing one by slug) and
+// creates a price record linking it to the given store. If the price record
+// already exists (product_id, store_id unique constraint), it is skipped.
+func (db *DB) UpsertProductAndPrice(title, productSlug, category, imageURL string, storeID int, price float64, currency, url string) error {
+	tx, err := db.conn.Begin()
+	if err != nil {
+		return fmt.Errorf("beginning transaction: %w", err)
+	}
+	defer tx.Rollback()
+
+	now := time.Now().UTC()
+
+	// Upsert product — if slug already exists, keep existing data and update image if missing.
+	var productID int
+	err = tx.QueryRow(`
+		INSERT INTO products (title, slug, category, image_url, created_at, updated_at)
+		VALUES ($1, $2, $3, $4, $5, $5)
+		ON CONFLICT (slug) DO UPDATE SET
+			image_url = COALESCE(NULLIF(products.image_url, ''), EXCLUDED.image_url),
+			updated_at = $5
+		RETURNING id
+	`, title, productSlug, category, imageURL, now).Scan(&productID)
+	if err != nil {
+		return fmt.Errorf("upserting product %s: %w", productSlug, err)
+	}
+
+	// Insert price — skip if this product+store pair already exists.
+	_, err = tx.Exec(`
+		INSERT INTO prices (product_id, store_id, current_price, currency, url, is_available, last_checked_at, created_at, updated_at)
+		VALUES ($1, $2, $3, $4, $5, true, $6, $6, $6)
+		ON CONFLICT (product_id, store_id) DO NOTHING
+	`, productID, storeID, price, currency, url, now)
+	if err != nil {
+		return fmt.Errorf("inserting price for product %d store %d: %w", productID, storeID, err)
+	}
+
+	return tx.Commit()
+}
