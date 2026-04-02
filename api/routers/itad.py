@@ -1,5 +1,6 @@
 from datetime import datetime, timezone
 from decimal import Decimal, InvalidOperation, ROUND_HALF_UP
+import logging
 import os
 import re
 import unicodedata
@@ -18,6 +19,7 @@ ITAD_FALLBACK_STORE_URL = "https://isthereanydeal.com"
 router = APIRouter(tags=["itad"])
 
 _slug_regex = re.compile(r"[^a-z0-9]+")
+logger = logging.getLogger(__name__)
 
 
 class ITADGameRead(SQLModel):
@@ -131,6 +133,65 @@ def _image_from_assets(game: dict[str, Any]) -> str | None:
         if isinstance(value, str) and value:
             return value
     return None
+
+
+def _merge_game_with_info(game: dict[str, Any], info: dict[str, Any]) -> dict[str, Any]:
+    merged = dict(game)
+
+    slug = info.get("slug")
+    if isinstance(slug, str) and slug:
+        merged["slug"] = slug
+
+    title = info.get("title")
+    if isinstance(title, str) and title:
+        merged["title"] = title
+
+    game_type = info.get("type")
+    if isinstance(game_type, str) and game_type:
+        merged["type"] = game_type
+
+    mature = info.get("mature")
+    if isinstance(mature, bool):
+        merged["mature"] = mature
+
+    assets = info.get("assets")
+    if isinstance(assets, dict) and assets:
+        merged["assets"] = assets
+
+    return merged
+
+
+def _hydrate_games_with_assets(
+    client: httpx.Client,
+    games: list[dict[str, Any]],
+) -> list[dict[str, Any]]:
+    hydrated: list[dict[str, Any]] = []
+
+    for game in games:
+        game_id = game.get("id")
+        if not isinstance(game_id, str):
+            hydrated.append(game)
+            continue
+
+        try:
+            info_payload = _itad_request(
+                client,
+                "GET",
+                "/games/info/v2",
+                params={"id": game_id},
+            )
+        except HTTPException as exc:
+            logger.warning("ITAD info lookup failed for %s: %s", game_id, exc.detail)
+            hydrated.append(game)
+            continue
+
+        if not isinstance(info_payload, dict):
+            hydrated.append(game)
+            continue
+
+        hydrated.append(_merge_game_with_info(game, info_payload))
+
+    return hydrated
 
 
 def _decimal_money(value: Any) -> Decimal | None:
@@ -268,6 +329,8 @@ def sync_itad_games(
                 history_created=0,
                 preview=[],
             )
+
+        selected_games = _hydrate_games_with_assets(client, selected_games)
 
         prices_payload = _itad_request(
             client,
