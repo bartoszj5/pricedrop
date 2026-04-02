@@ -3,51 +3,52 @@ package main
 import (
 	"encoding/json"
 	"fmt"
-	"html"
 	"log"
-	"strconv"
+	"net/http"
+	neturl "net/url"
+	"path"
 	"strings"
 	"time"
-
-	"github.com/gocolly/colly/v2"
 )
 
-type mediaExpertJSONLDProduct struct {
-	Type      string                  `json:"@type"`
-	Name      string                  `json:"name"`
-	ProductID string                  `json:"productID"`
-	SKU       string                  `json:"sku"`
-	Image     []string                `json:"image"`
-	Offers    mediaExpertJSONLDOffers `json:"offers"`
-	Brand     *mediaExpertJSONLDBrand `json:"brand"`
+const (
+	mediaExpertSearchIndex = "bde4319ab3462883803d0d7062ed396f1589349693"
+	mediaExpertSearchToken = "AC3815B3-B512-1F8F-F6CB-3754D3D58BF9"
+	mediaExpertSearchURL   = "https://api.synerise.com/search/v2/indices/" + mediaExpertSearchIndex + "/query"
+)
+
+type mediaExpertSearchResponse struct {
+	Data []mediaExpertSearchItem `json:"data"`
 }
 
-type mediaExpertJSONLDOffers struct {
-	Price         json.Number `json:"price"`
-	PriceCurrency string      `json:"priceCurrency"`
-	Availability  string      `json:"availability"`
+type mediaExpertSearchItem struct {
+	ItemID     string                 `json:"itemId"`
+	Link       string                 `json:"link"`
+	Title      string                 `json:"title"`
+	ImageLink  string                 `json:"imageLink"`
+	Brand      string                 `json:"brand"`
+	Category   string                 `json:"category"`
+	Price      mediaExpertSearchPrice `json:"price"`
+	Attributes map[string]string      `json:"attributes"`
 }
 
-type mediaExpertJSONLDBrand struct {
-	Name string `json:"name"`
-}
-
-var mediaExpertUnavailableMarkers = []string{
-	"Produkt chwilowo niedostępny w sklepie internetowym",
-	"Produkt chwilowo niedostępny",
-	"Produkt niedostępny",
-	"Powiadom mnie, gdy produkt będzie dostępny",
+type mediaExpertSearchPrice struct {
+	Value float64 `json:"value"`
 }
 
 type MediaExpertScraper struct {
 	userAgent    string
 	requestDelay time.Duration
+	httpClient   *http.Client
 }
 
 func NewMediaExpertScraper(userAgent string, requestDelay time.Duration) *MediaExpertScraper {
 	return &MediaExpertScraper{
 		userAgent:    userAgent,
 		requestDelay: requestDelay,
+		httpClient: &http.Client{
+			Timeout: 20 * time.Second,
+		},
 	}
 }
 
@@ -55,194 +56,145 @@ func (s *MediaExpertScraper) StoreName() string {
 	return "mediaexpert"
 }
 
-func (s *MediaExpertScraper) ScrapeProduct(url string) (*ScrapeResult, error) {
-	var result ScrapeResult
-	var scrapeErr error
-	result.Currency = "PLN"
-	result.IsAvailable = true
-
-	c := colly.NewCollector(
-		colly.AllowedDomains("www.mediaexpert.pl", "mediaexpert.pl"),
-		colly.UserAgent(s.userAgent),
-		colly.IgnoreRobotsTxt(),
-	)
-
-	c.Limit(&colly.LimitRule{
-		DomainGlob:  "*mediaexpert.pl*",
-		Delay:       s.requestDelay,
-		RandomDelay: 500 * time.Millisecond,
-		Parallelism: 1,
-	})
-
-	c.OnRequest(func(r *colly.Request) {
-		r.Headers.Set("Accept", "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8")
-		r.Headers.Set("Accept-Language", "pl-PL,pl;q=0.9,en-US;q=0.8,en;q=0.7")
-		r.Headers.Set("Accept-Encoding", "gzip, deflate")
-		r.Headers.Set("Cache-Control", "no-cache")
-		r.Headers.Set("Pragma", "no-cache")
-		r.Headers.Set("Sec-Ch-Ua", `"Chromium";v="131", "Not_A Brand";v="24"`)
-		r.Headers.Set("Sec-Ch-Ua-Mobile", "?0")
-		r.Headers.Set("Sec-Ch-Ua-Platform", `"Windows"`)
-		r.Headers.Set("Sec-Fetch-Dest", "document")
-		r.Headers.Set("Sec-Fetch-Mode", "navigate")
-		r.Headers.Set("Sec-Fetch-Site", "none")
-		r.Headers.Set("Sec-Fetch-User", "?1")
-		r.Headers.Set("Upgrade-Insecure-Requests", "1")
-		log.Printf("[mediaexpert] Scraping: %s", r.URL.String())
-	})
-
-	c.OnResponse(func(r *colly.Response) {
-		body := string(r.Body)
-		bodyLower := strings.ToLower(body)
-
-		if strings.Contains(body, "cf-turnstile-response") || strings.Contains(body, "potwierdzenie, że nie jesteś robotem") {
-			scrapeErr = fmt.Errorf("mediaexpert anti-bot challenge returned for %s", r.Request.URL)
-			return
-		}
-
-		for _, marker := range mediaExpertUnavailableMarkers {
-			if strings.Contains(body, marker) {
-				result.IsAvailable = false
-				break
-			}
-		}
-
-		if strings.Contains(body, "Do koszyka") || strings.Contains(body, "DO KOSZYKA") {
-			result.IsAvailable = true
-		}
-		if strings.Contains(bodyLower, "powiadom") && !strings.Contains(bodyLower, "do koszyka") {
-			result.IsAvailable = false
-		}
-	})
-
-	c.OnHTML(`script[type="application/ld+json"]`, func(e *colly.HTMLElement) {
-		var raw map[string]interface{}
-		if err := json.Unmarshal([]byte(e.Text), &raw); err != nil {
-			return
-		}
-		if raw["@type"] != "Product" {
-			return
-		}
-
-		var product mediaExpertJSONLDProduct
-		if err := json.Unmarshal([]byte(e.Text), &product); err != nil {
-			log.Printf("[mediaexpert] failed to parse JSON-LD Product: %v", err)
-			return
-		}
-
-		if result.ProductName == "" {
-			result.ProductName = strings.TrimSpace(product.Name)
-		}
-		if result.Currency == "" && product.Offers.PriceCurrency != "" {
-			result.Currency = product.Offers.PriceCurrency
-		}
-		if result.Price == 0 && product.Offers.Price != "" {
-			price, err := product.Offers.Price.Float64()
-			if err != nil {
-				log.Printf("[mediaexpert] failed to parse JSON-LD price %q: %v", product.Offers.Price, err)
-			} else {
-				result.Price = price
-			}
-		}
-		if len(product.Image) > 0 && result.ImageURL == "" {
-			result.ImageURL = product.Image[0]
-		}
-
-		if product.Offers.Availability != "" {
-			result.IsAvailable = parseMediaExpertAvailability(product.Offers.Availability)
-		}
-	})
-
-	c.OnHTML(`meta[property="product:price:amount"]`, func(e *colly.HTMLElement) {
-		content := strings.TrimSpace(e.Attr("content"))
-		if content == "" {
-			return
-		}
-		price, err := strconv.ParseFloat(content, 64)
-		if err != nil {
-			log.Printf("[mediaexpert] failed to parse meta price %q: %v", content, err)
-			return
-		}
-		result.Price = price
-	})
-
-	c.OnHTML(`meta[property="product:price:currency"]`, func(e *colly.HTMLElement) {
-		if content := strings.TrimSpace(e.Attr("content")); content != "" {
-			result.Currency = content
-		}
-	})
-
-	c.OnHTML(`meta[property="product:availability"]`, func(e *colly.HTMLElement) {
-		content := strings.TrimSpace(e.Attr("content"))
-		if content == "" {
-			return
-		}
-		result.IsAvailable = parseMediaExpertAvailability(content)
-	})
-
-	c.OnHTML(`meta[property="og:title"]`, func(e *colly.HTMLElement) {
-		content := strings.TrimSpace(e.Attr("content"))
-		if content == "" {
-			return
-		}
-		content = html.UnescapeString(content)
-		parts := strings.SplitN(content, " - ", 2)
-		result.ProductName = strings.TrimSpace(parts[0])
-	})
-
-	c.OnHTML(`meta[property="og:image"]`, func(e *colly.HTMLElement) {
-		if content := strings.TrimSpace(e.Attr("content")); content != "" {
-			result.ImageURL = content
-		}
-	})
-
-	c.OnError(func(r *colly.Response, err error) {
-		statusCode := 0
-		bodySize := 0
-		requestURL := url
-		if r != nil {
-			statusCode = r.StatusCode
-			bodySize = len(r.Body)
-			requestURL = r.Request.URL.String()
-		}
-		log.Printf("[mediaexpert] HTTP %d for %s (body: %d bytes)", statusCode, requestURL, bodySize)
-		scrapeErr = fmt.Errorf("HTTP %d for %s: %w", statusCode, requestURL, err)
-	})
-
-	if err := c.Visit(url); err != nil {
-		return nil, fmt.Errorf("visiting %s: %w", url, err)
+func (s *MediaExpertScraper) ScrapeProduct(productURL string) (*ScrapeResult, error) {
+	query, err := mediaExpertQueryFromProductURL(productURL)
+	if err != nil {
+		return nil, err
 	}
 
-	if scrapeErr != nil {
-		return nil, scrapeErr
+	item, err := s.findProduct(productURL, query)
+	if err != nil {
+		return nil, err
 	}
 
-	if result.ProductName == "" && result.Price == 0 {
-		return nil, fmt.Errorf("no product data found at %s", url)
+	if item.Title == "" || item.Price.Value <= 0 {
+		return nil, fmt.Errorf("mediaexpert search result missing required data for %s", productURL)
 	}
 
-	return &result, nil
+	result := &ScrapeResult{
+		ProductName: strings.TrimSpace(item.Title),
+		Price:       item.Price.Value,
+		Currency:    "PLN",
+		ImageURL:    strings.TrimSpace(item.ImageLink),
+		IsAvailable: mediaExpertAvailabilityFromSearch(*item),
+	}
+
+	log.Printf("[mediaexpert] Matched %s -> itemId=%s price=%.2f available=%v",
+		productURL, item.ItemID, result.Price, result.IsAvailable)
+
+	return result, nil
 }
 
-func parseMediaExpertAvailability(value string) bool {
-	normalized := strings.ToLower(strings.TrimSpace(value))
-
-	switch {
-	case normalized == "":
-		return true
-	case strings.Contains(normalized, "notavailable"):
-		return false
-	case strings.Contains(normalized, "outofstock"):
-		return false
-	case strings.Contains(normalized, "soldout"):
-		return false
-	case strings.Contains(normalized, "discontinued"):
-		return false
-	case strings.Contains(normalized, "instock"):
-		return true
-	case strings.Contains(normalized, "available"):
-		return true
-	default:
-		return true
+func (s *MediaExpertScraper) findProduct(productURL, query string) (*mediaExpertSearchItem, error) {
+	if s.requestDelay > 0 {
+		time.Sleep(s.requestDelay)
 	}
+
+	results, err := s.search(query, 10)
+	if err != nil {
+		return nil, err
+	}
+
+	targetKey := normalizeMediaExpertURL(productURL)
+	for _, item := range results {
+		if normalizeMediaExpertURL(item.Link) == targetKey {
+			return &item, nil
+		}
+	}
+
+	if len(results) == 0 {
+		return nil, fmt.Errorf("no mediaexpert search results for %s", productURL)
+	}
+
+	return nil, fmt.Errorf("mediaexpert search did not return exact match for %s", productURL)
+}
+
+func (s *MediaExpertScraper) search(query string, limit int) ([]mediaExpertSearchItem, error) {
+	params := neturl.Values{}
+	params.Set("query", query)
+	params.Set("limit", fmt.Sprintf("%d", limit))
+	params.Set("clientUUID", "pricedrop-mediaexpert-scraper")
+	params.Set("token", mediaExpertSearchToken)
+	params.Set("filters", `category!="Outlet"`)
+
+	req, err := http.NewRequest(http.MethodGet, mediaExpertSearchURL+"?"+params.Encode(), nil)
+	if err != nil {
+		return nil, fmt.Errorf("creating mediaexpert search request: %w", err)
+	}
+
+	req.Header.Set("Accept", "application/json")
+	req.Header.Set("Accept-Language", "pl-PL,pl;q=0.9,en-US;q=0.8,en;q=0.7")
+	req.Header.Set("User-Agent", s.userAgent)
+	req.Header.Set("Referer", "https://www.mediaexpert.pl/")
+
+	resp, err := s.httpClient.Do(req)
+	if err != nil {
+		return nil, fmt.Errorf("calling mediaexpert search API: %w", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		return nil, fmt.Errorf("mediaexpert search API returned HTTP %d", resp.StatusCode)
+	}
+
+	var payload mediaExpertSearchResponse
+	if err := json.NewDecoder(resp.Body).Decode(&payload); err != nil {
+		return nil, fmt.Errorf("decoding mediaexpert search API response: %w", err)
+	}
+
+	return payload.Data, nil
+}
+
+func mediaExpertQueryFromProductURL(rawURL string) (string, error) {
+	parsed, err := neturl.Parse(rawURL)
+	if err != nil {
+		return "", fmt.Errorf("parsing mediaexpert URL %q: %w", rawURL, err)
+	}
+
+	slug := strings.Trim(path.Base(strings.TrimSpace(parsed.Path)), "/")
+	if slug == "" || slug == "." || slug == "/" {
+		return "", fmt.Errorf("could not derive product slug from %s", rawURL)
+	}
+
+	slug, err = neturl.PathUnescape(slug)
+	if err != nil {
+		return "", fmt.Errorf("decoding product slug from %s: %w", rawURL, err)
+	}
+
+	slug = strings.TrimSuffix(slug, ".html")
+	slug = strings.ReplaceAll(slug, "-", " ")
+	slug = strings.Join(strings.Fields(slug), " ")
+	if slug == "" {
+		return "", fmt.Errorf("could not derive mediaexpert search query from %s", rawURL)
+	}
+
+	return slug, nil
+}
+
+func normalizeMediaExpertURL(rawURL string) string {
+	parsed, err := neturl.Parse(strings.TrimSpace(rawURL))
+	if err != nil {
+		return strings.TrimRight(strings.ToLower(strings.TrimSpace(rawURL)), "/")
+	}
+
+	host := strings.TrimPrefix(strings.ToLower(parsed.Host), "www.")
+	cleanPath := strings.TrimRight(strings.ToLower(parsed.EscapedPath()), "/")
+	if cleanPath == "" {
+		cleanPath = "/"
+	}
+
+	return host + cleanPath
+}
+
+func mediaExpertAvailabilityFromSearch(item mediaExpertSearchItem) bool {
+	if item.Price.Value <= 0 {
+		return false
+	}
+
+	title := strings.ToLower(item.Title)
+	if strings.Contains(title, "wycof") || strings.Contains(title, "niedost") {
+		return false
+	}
+
+	return true
 }
