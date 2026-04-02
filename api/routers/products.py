@@ -6,6 +6,7 @@ from typing import Annotated
 from fastapi import APIRouter, Depends, HTTPException, Query, Response, status
 from pydantic import ConfigDict
 from sqlalchemy import func, or_
+from sqlalchemy.orm import aliased
 from sqlmodel import SQLModel, Session, delete, select
 
 from shared.database import get_session
@@ -85,6 +86,32 @@ class ProductDetailResponse(SQLModel):
     prices: list[ProductStorePriceRead]
 
 
+class ProductWithBestPriceRead(SQLModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: int
+    title: str
+    slug: str
+    category: str
+    description: str | None
+    image_url: str | None
+    release_date: datetime | None
+    created_at: datetime
+    updated_at: datetime
+    best_price: Decimal | None = None
+    best_price_currency: str | None = None
+    best_store_name: str | None = None
+    best_store_slug: str | None = None
+
+
+class ProductWithPricesListResponse(SQLModel):
+    items: list[ProductWithBestPriceRead]
+    total: int
+    page: int
+    page_size: int
+    total_pages: int
+
+
 router = APIRouter(tags=["products"])
 
 
@@ -136,6 +163,106 @@ def list_products(
 
     return ProductListResponse(
         items=[ProductRead.model_validate(product) for product in products],
+        total=total,
+        page=page,
+        page_size=page_size,
+        total_pages=ceil(total / page_size) if total else 0,
+    )
+
+
+@router.get("/products/with-prices", response_model=ProductWithPricesListResponse)
+def list_products_with_prices(
+    session: SessionDep,
+    search: Annotated[str | None, Query(max_length=255)] = None,
+    page: Annotated[int, Query(ge=1)] = 1,
+    page_size: Annotated[int, Query(ge=1, le=100)] = 20,
+) -> ProductWithPricesListResponse:
+    query = select(Product)
+    count_query = select(func.count()).select_from(Product)
+
+    if search and search.strip():
+        pattern = f"%{search.strip()}%"
+        condition = or_(
+            Product.title.ilike(pattern),
+            Product.slug.ilike(pattern),
+            Product.category.ilike(pattern),
+        )
+        query = query.where(condition)
+        count_query = count_query.where(condition)
+
+    total = session.exec(count_query).one()
+    products = session.exec(
+        query
+        .order_by(Product.title.asc())
+        .offset((page - 1) * page_size)
+        .limit(page_size)
+    ).all()
+
+    product_ids = [p.id for p in products]
+
+    best_prices: dict[int, tuple[Decimal, str, str, str]] = {}
+    if product_ids:
+        # Subquery: rank prices per product by current_price ascending
+        ranked = (
+            select(
+                Price.product_id,
+                Price.current_price,
+                Price.currency,
+                Store.name.label("store_name"),
+                Store.slug.label("store_slug"),
+                func.row_number()
+                .over(
+                    partition_by=Price.product_id,
+                    order_by=Price.current_price.asc(),
+                )
+                .label("rn"),
+            )
+            .join(Store, Price.store_id == Store.id)
+            .where(Price.product_id.in_(product_ids), Price.is_available == True)
+            .subquery()
+        )
+
+        rows = session.exec(
+            select(
+                ranked.c.product_id,
+                ranked.c.current_price,
+                ranked.c.currency,
+                ranked.c.store_name,
+                ranked.c.store_slug,
+            ).where(ranked.c.rn == 1)
+        ).all()
+
+        for row in rows:
+            best_prices[row.product_id] = (
+                row.current_price,
+                row.currency,
+                row.store_name,
+                row.store_slug,
+            )
+
+    items = []
+    for product in products:
+        bp = best_prices.get(product.id)
+        items.append(
+            ProductWithBestPriceRead(
+                id=product.id,
+                title=product.title,
+                slug=product.slug,
+                category=product.category,
+                description=product.description,
+                image_url=product.image_url,
+                release_date=product.release_date,
+                created_at=product.created_at,
+                updated_at=product.updated_at,
+                best_price=bp[0] if bp else None,
+                best_price_currency=bp[1] if bp else None,
+                best_store_name=bp[2] if bp else None,
+                best_store_slug=bp[3] if bp else None,
+            )
+        )
+
+    return ProductWithPricesListResponse(
+        items=items,
         total=total,
         page=page,
         page_size=page_size,

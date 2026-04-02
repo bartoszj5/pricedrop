@@ -1,65 +1,53 @@
 "use client";
 
-import { Search, TrendingDown, Bell } from "lucide-react";
-import { useState } from "react";
+import { TrendingDown, Bell } from "lucide-react";
+import Link from "next/link";
+import { usePathname } from "next/navigation";
+import SearchInput from "./SearchInput";
 
 const navLinks = [
-  { label: "Gry", key: "gry" },
-  { label: "Elektronika", key: "elektronika" },
-  { label: "Okazje", key: "okazje" },
-  { label: "Sledzone", key: "sledzone" },
+  { label: "Produkty", href: "/" },
+  { label: "Sklepy", href: "/stores" },
+  { label: "Szukaj ITAD", href: "/search" },
 ];
 
-interface NavbarProps {
-  activeNav: string;
-  onNavChange: (key: string) => void;
-  searchQuery: string;
-  onSearchChange: (query: string) => void;
-}
+export default function Navbar() {
+  const pathname = usePathname();
 
-export default function Navbar({
-  activeNav,
-  onNavChange,
-  searchQuery,
-  onSearchChange,
-}: NavbarProps) {
   return (
     <nav className="flex items-center gap-6 h-16 px-8 bg-bg-secondary w-full">
       {/* Logo */}
-      <div className="flex items-center gap-2.5 shrink-0">
+      <Link href="/" className="flex items-center gap-2.5 shrink-0">
         <TrendingDown className="w-7 h-7 text-accent-green" />
         <span className="text-[22px] font-bold text-text-primary">
           PriceDrop
         </span>
-      </div>
+      </Link>
 
       {/* Search Bar */}
-      <div className="flex items-center gap-2.5 flex-1 h-10 bg-bg-tertiary rounded-xl px-4">
-        <Search className="w-[18px] h-[18px] text-text-muted shrink-0" />
-        <input
-          type="text"
-          placeholder="Szukaj gier, elektroniki, okazji..."
-          value={searchQuery}
-          onChange={(e) => onSearchChange(e.target.value)}
-          className="bg-transparent text-sm text-text-primary placeholder:text-text-muted outline-none w-full"
-        />
-      </div>
+      <SearchInput />
 
       {/* Nav Links */}
       <div className="flex items-center gap-2 shrink-0">
-        {navLinks.map((link) => (
-          <button
-            key={link.key}
-            onClick={() => onNavChange(link.key)}
-            className={`flex items-center justify-center h-9 px-4 rounded-lg text-sm font-medium transition-colors ${
-              activeNav === link.key
-                ? "bg-accent-blue text-white"
-                : "text-text-secondary hover:text-text-primary hover:bg-bg-tertiary"
-            }`}
-          >
-            {link.label}
-          </button>
-        ))}
+        {navLinks.map((link) => {
+          const isActive =
+            link.href === "/"
+              ? pathname === "/"
+              : pathname.startsWith(link.href);
+          return (
+            <Link
+              key={link.href}
+              href={link.href}
+              className={`flex items-center justify-center h-9 px-4 rounded-lg text-sm font-medium transition-colors ${
+                isActive
+                  ? "bg-accent-blue text-white"
+                  : "text-text-secondary hover:text-text-primary hover:bg-bg-tertiary"
+              }`}
+            >
+              {link.label}
+            </Link>
+          );
+        })}
       </div>
 
       {/* User Section */}

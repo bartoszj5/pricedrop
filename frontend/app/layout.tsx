@@ -1,4 +1,6 @@
 import type { Metadata } from "next";
+import { Suspense } from "react";
+import Navbar from "./components/Navbar";
 import "./globals.css";
 
 export const metadata: Metadata = {
@@ -19,7 +21,15 @@ export default function RootLayout({
           rel="stylesheet"
         />
       </head>
-      <body className="antialiased">{children}</body>
+      <body className="antialiased">
+        <div className="flex flex-col h-screen overflow-hidden">
+          <Suspense>
+            <Navbar />
+          </Suspense>
+          <div className="h-px w-full bg-border" />
+          {children}
+        </div>
+      </body>
     </html>
   );
 }

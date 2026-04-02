@@ -1,210 +1,93 @@
-"use client";
-
-import { useState } from "react";
-import { ArrowUpDown, LayoutGrid, List } from "lucide-react";
-import Navbar from "./components/Navbar";
+import { Suspense } from "react";
+import { getProducts, getStores } from "./lib/api";
 import Sidebar from "./components/Sidebar";
 import FeaturedBanner from "./components/FeaturedBanner";
 import ProductCard from "./components/ProductCard";
-import type { ProductCardData } from "./types";
+import Pagination from "./components/Pagination";
+import SortDropdown from "./components/SortDropdown";
+import EmptyState from "./components/EmptyState";
+import type { ProductWithBestPrice } from "./types";
 
-const MOCK_PRODUCTS: ProductCardData[] = [
-  {
-    id: 1,
-    title: "Elden Ring",
-    slug: "elden-ring",
-    category: "RPG",
-    image_url: "https://cdn.cloudflare.steamstatic.com/steam/apps/1245620/header.jpg",
-    store: "Steam",
-    current_price: 129.99,
-    old_price: 249.99,
-    discount: 48,
-    currency: "PLN",
-  },
-  {
-    id: 2,
-    title: "Baldur's Gate 3",
-    slug: "baldurs-gate-3",
-    category: "RPG",
-    image_url: "https://cdn.cloudflare.steamstatic.com/steam/apps/1086940/header.jpg",
-    store: "Steam",
-    current_price: 149.99,
-    old_price: 249.99,
-    discount: 40,
-    currency: "PLN",
-  },
-  {
-    id: 3,
-    title: "Baldur's Gate 3",
-    slug: "baldurs-gate-3-gog",
-    category: "RPG",
-    image_url: "https://cdn.cloudflare.steamstatic.com/steam/apps/1086940/header.jpg",
-    store: "GOG",
-    current_price: 149.99,
-    old_price: 249.99,
-    discount: 40,
-    currency: "PLN",
-  },
-  {
-    id: 4,
-    title: "Red Dead Redemption 2",
-    slug: "red-dead-redemption-2",
-    category: "Akcja",
-    image_url: "https://cdn.cloudflare.steamstatic.com/steam/apps/1174180/header.jpg",
-    store: "Steam",
-    current_price: 59.99,
-    old_price: 239.99,
-    discount: 75,
-    currency: "PLN",
-  },
-  {
-    id: 5,
-    title: "Sony WH-1000XM5",
-    slug: "sony-wh-1000xm5",
-    category: "Audio",
-    image_url: null,
-    store: "MediaExpert",
-    current_price: 1199,
-    old_price: 1799,
-    discount: 33,
-    currency: "PLN",
-  },
-  {
-    id: 6,
-    title: "PS5 DualSense Edge",
-    slug: "ps5-dualsense-edge",
-    category: "Akcesoria",
-    image_url: null,
-    store: "Morele",
-    current_price: 799,
-    old_price: 1049,
-    discount: 24,
-    currency: "PLN",
-  },
-  {
-    id: 7,
-    title: "Samsung Galaxy S24 Ultra",
-    slug: "samsung-galaxy-s24-ultra",
-    category: "Smartfony",
-    image_url: null,
-    store: "x-kom",
-    current_price: 5499,
-    old_price: null,
-    discount: null,
-    currency: "PLN",
-  },
-  {
-    id: 8,
-    title: "The Witcher 3: Wild Hunt",
-    slug: "the-witcher-3",
-    category: "RPG",
-    image_url: "https://cdn.cloudflare.steamstatic.com/steam/apps/292030/header.jpg",
-    store: "GOG",
-    current_price: 29.99,
-    old_price: 149.99,
-    discount: 80,
-    currency: "PLN",
-  },
-];
+interface PageProps {
+  searchParams: Promise<{ [key: string]: string | string[] | undefined }>;
+}
 
-export default function Home() {
-  const [activeNav, setActiveNav] = useState("elektronika");
-  const [searchQuery, setSearchQuery] = useState("");
-  const [viewMode, setViewMode] = useState<"grid" | "list">("grid");
+export default async function Home({ searchParams }: PageProps) {
+  const params = await searchParams;
+  const search = typeof params.search === "string" ? params.search : undefined;
+  const page = typeof params.page === "string" ? parseInt(params.page, 10) || 1 : 1;
+  const category = typeof params.category === "string" ? params.category : undefined;
+  const store = typeof params.store === "string" ? params.store : undefined;
 
-  // Chunk products into rows of 4
-  const rows: ProductCardData[][] = [];
-  for (let i = 0; i < MOCK_PRODUCTS.length; i += 4) {
-    rows.push(MOCK_PRODUCTS.slice(i, i + 4));
+  const searchQuery = [search, category].filter(Boolean).join(" ");
+
+  const [productsData, storesData] = await Promise.all([
+    getProducts({ search: searchQuery || undefined, page, page_size: 20 }),
+    getStores({ page_size: 100 }),
+  ]);
+
+  // Client-side store filter: the API search only filters by title/slug/category,
+  // so we filter by store on the server component level
+  let items = productsData.items;
+  if (store) {
+    items = items.filter((p) => p.best_store_slug === store);
   }
 
+  // Extract unique categories from all products for sidebar
+  const categories = [...new Set(productsData.items.map((p) => p.category))].sort();
+
+  // Find product with lowest price for featured banner
+  const featured: ProductWithBestPrice | null =
+    items.reduce<ProductWithBestPrice | null>((best, p) => {
+      if (p.best_price == null) return best;
+      if (!best || (best.best_price != null && p.best_price < best.best_price)) return p;
+      return best;
+    }, null);
+
   return (
-    <div className="flex flex-col h-screen overflow-hidden">
-      {/* Navbar */}
-      <Navbar
-        activeNav={activeNav}
-        onNavChange={setActiveNav}
-        searchQuery={searchQuery}
-        onSearchChange={setSearchQuery}
-      />
+    <div className="flex flex-1 overflow-hidden">
+      <Suspense>
+        <Sidebar stores={storesData.items} categories={categories} />
+      </Suspense>
+      <div className="w-px bg-border" />
 
-      {/* Divider */}
-      <div className="h-px w-full bg-border" />
-
-      {/* Body */}
-      <div className="flex flex-1 overflow-hidden">
-        {/* Sidebar */}
-        <Sidebar />
-
-        {/* Sidebar Divider */}
-        <div className="w-px bg-border" />
-
-        {/* Main Content */}
-        <main className="flex-1 flex flex-col gap-6 p-7 px-8 overflow-y-auto">
-          {/* Header Row */}
-          <div className="flex items-center justify-between">
-            <div className="flex flex-col gap-1">
-              <h1 className="text-2xl font-bold text-text-primary">
-                Najlepsze okazje
-              </h1>
-              <p className="text-[13px] text-text-muted">
-                2,847 produktow &bull; Ostatnia aktualizacja: 5 min temu
-              </p>
-            </div>
-            <div className="flex items-center gap-2.5">
-              <button className="flex items-center gap-2 h-9 px-3.5 rounded-lg bg-bg-tertiary text-[13px] text-text-secondary hover:text-text-primary transition-colors">
-                <ArrowUpDown className="w-3.5 h-3.5" />
-                Sortuj: Najwieksza znizka
-              </button>
-              <button
-                onClick={() => setViewMode("grid")}
-                className={`flex items-center justify-center w-9 h-9 rounded-lg transition-colors ${
-                  viewMode === "grid"
-                    ? "bg-bg-tertiary text-text-primary"
-                    : "text-text-muted hover:text-text-primary"
-                }`}
-              >
-                <LayoutGrid className="w-4 h-4" />
-              </button>
-              <button
-                onClick={() => setViewMode("list")}
-                className={`flex items-center justify-center w-9 h-9 rounded-lg transition-colors ${
-                  viewMode === "list"
-                    ? "bg-bg-tertiary text-text-primary"
-                    : "text-text-muted hover:text-text-primary"
-                }`}
-              >
-                <List className="w-4 h-4" />
-              </button>
-            </div>
+      <main className="flex-1 flex flex-col gap-6 p-7 px-8 overflow-y-auto">
+        {/* Header Row */}
+        <div className="flex items-center justify-between">
+          <div className="flex flex-col gap-1">
+            <h1 className="text-2xl font-bold text-text-primary">
+              {search ? `Wyniki: "${search}"` : "Najlepsze okazje"}
+            </h1>
+            <p className="text-[13px] text-text-muted">
+              {productsData.total} produktów
+            </p>
           </div>
+          <Suspense>
+            <SortDropdown />
+          </Suspense>
+        </div>
 
-          {/* Featured Banner */}
-          <FeaturedBanner
-            title="Cyberpunk 2077: Ultimate Edition"
-            description="Najnizsza cena w historii — tylko przez 48h!"
-            oldPrice="299,99 zl"
-            newPrice="89,99 zl"
-            discount="-70%"
-          />
+        {/* Featured Banner */}
+        {!search && !category && page === 1 && (
+          <FeaturedBanner product={featured} />
+        )}
 
-          {/* Product Grid */}
-          <div className="flex flex-col gap-4">
-            {rows.map((row, rowIdx) => (
-              <div key={rowIdx} className="flex gap-4">
-                {row.map((product) => (
-                  <ProductCard key={product.id} product={product} />
-                ))}
-                {/* Fill empty slots to maintain grid alignment */}
-                {row.length < 4 &&
-                  Array.from({ length: 4 - row.length }).map((_, i) => (
-                    <div key={`empty-${i}`} className="flex-1 min-w-0" />
-                  ))}
-              </div>
+        {/* Product Grid */}
+        {items.length > 0 ? (
+          <div className="grid grid-cols-4 gap-4">
+            {items.map((product) => (
+              <ProductCard key={product.id} product={product} />
             ))}
           </div>
-        </main>
-      </div>
+        ) : (
+          <EmptyState message="Nie znaleziono produktów" />
+        )}
+
+        {/* Pagination */}
+        <Suspense>
+          <Pagination page={page} totalPages={productsData.total_pages} />
+        </Suspense>
+      </main>
     </div>
   );
 }

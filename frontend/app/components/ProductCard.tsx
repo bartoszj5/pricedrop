@@ -1,21 +1,17 @@
-"use client";
-
-import { Heart } from "lucide-react";
-import type { ProductCardData } from "../types";
+import Link from "next/link";
+import type { ProductWithBestPrice } from "../types";
+import { formatPrice } from "../lib/utils";
 
 interface ProductCardProps {
-  product: ProductCardData;
+  product: ProductWithBestPrice;
 }
 
 export default function ProductCard({ product }: ProductCardProps) {
-  const formatPrice = (price: number) =>
-    price.toLocaleString("pl-PL", {
-      minimumFractionDigits: 2,
-      maximumFractionDigits: 2,
-    }) + " zl";
-
   return (
-    <div className="flex flex-col bg-bg-card rounded-xl overflow-hidden flex-1 min-w-0">
+    <Link
+      href={`/products/${product.slug}`}
+      className="flex flex-col bg-bg-card rounded-xl overflow-hidden hover:ring-1 hover:ring-border transition-all"
+    >
       {/* Image */}
       <div className="w-full h-[140px] bg-bg-tertiary overflow-hidden">
         {product.image_url ? (
@@ -38,9 +34,11 @@ export default function ProductCard({ product }: ProductCardProps) {
           <span className="flex items-center h-[22px] px-2 rounded-md bg-bg-tertiary text-[10px] font-medium text-text-muted">
             {product.category}
           </span>
-          <span className="flex items-center h-[22px] px-2 rounded-md bg-bg-tertiary text-[10px] font-medium text-text-muted">
-            {product.store}
-          </span>
+          {product.best_store_name && (
+            <span className="flex items-center h-[22px] px-2 rounded-md bg-bg-tertiary text-[10px] font-medium text-text-muted">
+              {product.best_store_name}
+            </span>
+          )}
         </div>
 
         {/* Title */}
@@ -50,29 +48,15 @@ export default function ProductCard({ product }: ProductCardProps) {
 
         {/* Price Row */}
         <div className="flex items-center justify-between">
-          <div className="flex items-center gap-2">
+          {product.best_price != null ? (
             <span className="text-lg font-bold text-text-primary">
-              {formatPrice(product.current_price)}
+              {formatPrice(product.best_price, product.best_price_currency ?? "PLN")}
             </span>
-            {product.old_price && (
-              <span className="text-xs text-text-muted line-through">
-                {formatPrice(product.old_price)}
-              </span>
-            )}
-          </div>
-          {product.discount && (
-            <span className="flex items-center h-6 px-2 rounded-md bg-accent-green/[0.13] text-xs font-bold text-accent-green">
-              -{product.discount}%
-            </span>
+          ) : (
+            <span className="text-sm text-text-muted">Brak cen</span>
           )}
         </div>
-
-        {/* Track Price */}
-        <button className="flex items-center gap-2 text-text-muted hover:text-accent-red transition-colors">
-          <Heart className="w-3.5 h-3.5" />
-          <span className="text-[11px]">Sledz cene</span>
-        </button>
       </div>
-    </div>
+    </Link>
   );
 }

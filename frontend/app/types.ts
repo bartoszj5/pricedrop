@@ -10,6 +10,21 @@ export interface Product {
   updated_at: string;
 }
 
+export interface ProductWithBestPrice extends Product {
+  best_price: number | null;
+  best_price_currency: string | null;
+  best_store_name: string | null;
+  best_store_slug: string | null;
+}
+
+export interface ProductWithPricesListResponse {
+  items: ProductWithBestPrice[];
+  total: number;
+  page: number;
+  page_size: number;
+  total_pages: number;
+}
+
 export interface Store {
   id: number;
   name: string;
@@ -17,6 +32,18 @@ export interface Store {
   url: string;
   logo_url: string | null;
   is_active: boolean;
+}
+
+export interface StoreRead extends Store {
+  created_at: string;
+}
+
+export interface StoreListResponse {
+  items: StoreRead[];
+  total: number;
+  page: number;
+  page_size: number;
+  total_pages: number;
 }
 
 export interface ProductStorePriceRead {
@@ -33,6 +60,47 @@ export interface ProductStorePriceRead {
   last_checked_at: string | null;
 }
 
+export interface ProductDetailResponse {
+  product: Product;
+  prices: ProductStorePriceRead[];
+}
+
+export interface ProductPriceHistoryRead {
+  history_id: number;
+  price_id: number;
+  store_id: number;
+  store_name: string;
+  store_slug: string;
+  old_price: number;
+  new_price: number;
+  currency: string;
+  recorded_at: string;
+}
+
+export interface PriceDetailRead {
+  id: number;
+  product_id: number;
+  store_id: number;
+  current_price: number;
+  currency: string;
+  url: string;
+  is_available: boolean;
+  last_checked_at: string | null;
+  created_at: string;
+  updated_at: string;
+  product_slug: string;
+  store_slug: string;
+  store_name: string;
+}
+
+export interface PriceListResponse {
+  items: PriceDetailRead[];
+  total: number;
+  page: number;
+  page_size: number;
+  total_pages: number;
+}
+
 export interface ProductListResponse {
   items: Product[];
   total: number;
@@ -41,15 +109,11 @@ export interface ProductListResponse {
   total_pages: number;
 }
 
-export interface ProductCardData {
-  id: number;
-  title: string;
+export interface ITADGameRead {
+  id: string;
   slug: string;
-  category: string;
+  title: string;
+  type: string | null;
+  mature: boolean;
   image_url: string | null;
-  store: string;
-  current_price: number;
-  old_price: number | null;
-  discount: number | null;
-  currency: string;
 }
