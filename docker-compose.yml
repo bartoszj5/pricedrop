@@ -54,6 +54,9 @@ services:
       DATABASE_URL: postgresql://${POSTGRES_USER:-pricedrop}:${POSTGRES_PASSWORD:-pricedrop}@postgres:5432/${POSTGRES_DB:-pricedrop}
       REDIS_URL: redis://redis:6379/0
       RABBITMQ_URL: amqp://${RABBITMQ_USER:-guest}:${RABBITMQ_PASS:-guest}@rabbitmq:5672/
+      ITAD_API_KEY: ${ITAD_API_KEY:-}
+      ITAD_BASE_URL: ${ITAD_BASE_URL:-https://api.isthereanydeal.com}
+      ITAD_TIMEOUT_SECONDS: ${ITAD_TIMEOUT_SECONDS:-20}
       PYTHONPATH: /app
     depends_on:
       postgres:
