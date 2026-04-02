@@ -33,7 +33,8 @@ func main() {
 
 	registry := NewScraperRegistry()
 	meScraper := NewMediaExpertScraper(cfg.UserAgent, cfg.RequestDelay)
-	registry.Register("x-kom", NewXKomScraper(cfg.UserAgent, cfg.RequestDelay))
+	xkomScraperDelay := time.Duration(0)
+	registry.Register("x-kom", NewXKomScraper(cfg.UserAgent, xkomScraperDelay))
 	registry.Register("mediaexpert", meScraper)
 	registry.Register("morele", NewMoreleScraper(cfg.UserAgent, cfg.RequestDelay))
 	registry.Register("amazon", NewAmazonScraper(cfg.UserAgent, cfg.RequestDelay))

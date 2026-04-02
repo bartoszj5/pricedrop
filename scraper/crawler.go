@@ -100,3 +100,12 @@ func addPageParam(baseURL string, page int) string {
 	}
 	return fmt.Sprintf("%s%spage=%d", baseURL, sep, page)
 }
+
+// addPagePath appends a path-based pagination suffix to a category URL.
+func addPagePath(baseURL string, page int) string {
+	if page <= 1 {
+		return baseURL
+	}
+	baseURL = strings.TrimRight(baseURL, "/")
+	return fmt.Sprintf("%s/,,,,,,,,0,,,,/%d/", baseURL, page)
+}
