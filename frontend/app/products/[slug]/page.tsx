@@ -1,20 +1,11 @@
 import { notFound } from "next/navigation";
 import Link from "next/link";
-import dynamic from "next/dynamic";
 import { ArrowLeft, Calendar, Tag } from "lucide-react";
 import { getProductDetail, getProductHistory } from "../../lib/api";
 import { formatPrice, formatDate } from "../../lib/utils";
 import PriceComparisonTable from "../../components/PriceComparisonTable";
-import { SkeletonBox } from "../../components/Skeleton";
+import PriceHistoryChartClient from "../../components/PriceHistoryChartClient";
 import type { Metadata } from "next";
-
-const PriceHistoryChart = dynamic(
-  () => import("../../components/PriceHistoryChart"),
-  {
-    ssr: false,
-    loading: () => <SkeletonBox className="w-full h-[320px]" />,
-  },
-);
 
 interface PageProps {
   params: Promise<{ slug: string }>;
@@ -140,7 +131,7 @@ export default async function ProductDetailPage({ params }: PageProps) {
             Historia cen
           </h2>
           <div className="bg-bg-card rounded-xl p-4 border border-border">
-            <PriceHistoryChart history={history} />
+            <PriceHistoryChartClient history={history} />
           </div>
         </section>
       </main>

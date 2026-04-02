@@ -8,16 +8,31 @@ import type {
   ITADGameRead,
 } from "../types";
 
-const API_BASE = process.env.INTERNAL_API_URL || "http://api:8000";
+const API_BASES = process.env.INTERNAL_API_URL
+  ? [process.env.INTERNAL_API_URL]
+  : ["http://localhost:8000", "http://api:8000"];
 
 async function fetchServer<T>(path: string, revalidate = 60): Promise<T> {
-  const res = await fetch(`${API_BASE}${path}`, {
-    next: { revalidate },
-  });
-  if (!res.ok) {
-    throw new Error(`API error ${res.status}: ${path}`);
+  let lastError: Error | undefined;
+
+  for (const base of API_BASES) {
+    try {
+      const res = await fetch(`${base}${path}`, {
+        next: { revalidate },
+      });
+      if (!res.ok) {
+        throw new Error(`API error ${res.status}: ${path}`);
+      }
+      return res.json();
+    } catch (error) {
+      if (error instanceof Error && error.message.startsWith("API error")) {
+        throw error;
+      }
+      lastError = error instanceof Error ? error : new Error(String(error));
+    }
   }
-  return res.json();
+
+  throw lastError ?? new Error(`Failed to fetch API path: ${path}`);
 }
 
 // --- Products ---
