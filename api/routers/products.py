@@ -236,7 +236,7 @@ def create_product(payload: ProductCreate, session: SessionDep) -> ProductRead:
     return ProductRead.model_validate(product)
 
 
-@router.put("/products/{slug}", response_model=ProductRead)
+@router.patch("/products/{slug}", response_model=ProductRead)
 def update_product(
     slug: str,
     payload: ProductUpdate,

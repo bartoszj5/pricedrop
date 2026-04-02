@@ -1,8 +1,9 @@
+from datetime import datetime
 from math import ceil
 from typing import Annotated
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Response, status
-from pydantic import ConfigDict
+from pydantic import ConfigDict, field_validator
 from sqlalchemy import func, or_
 from sqlmodel import SQLModel, Session, delete, select
 
@@ -19,6 +20,13 @@ class StoreCreate(SQLModel):
     logo_url: str | None = None
     is_active: bool = True
 
+    @field_validator("url")
+    @classmethod
+    def validate_url(cls, v: str) -> str:
+        if not v.startswith(("http://", "https://")):
+            raise ValueError("URL must start with http:// or https://")
+        return v
+
 
 class StoreUpdate(SQLModel):
     name: str | None = None
@@ -26,6 +34,13 @@ class StoreUpdate(SQLModel):
     url: str | None = None
     logo_url: str | None = None
     is_active: bool | None = None
+
+    @field_validator("url")
+    @classmethod
+    def validate_url(cls, v: str | None) -> str | None:
+        if v is not None and not v.startswith(("http://", "https://")):
+            raise ValueError("URL must start with http:// or https://")
+        return v
 
 
 class StoreRead(SQLModel):
@@ -37,6 +52,7 @@ class StoreRead(SQLModel):
     url: str
     logo_url: str | None
     is_active: bool
+    created_at: datetime
 
 
 class StoreListResponse(SQLModel):
@@ -119,7 +135,7 @@ def create_store(payload: StoreCreate, session: SessionDep) -> StoreRead:
     return StoreRead.model_validate(store)
 
 
-@router.put("/stores/{slug}", response_model=StoreRead)
+@router.patch("/stores/{slug}", response_model=StoreRead)
 def update_store(slug: str, payload: StoreUpdate, session: SessionDep) -> StoreRead:
     store = _get_store_by_slug(session, slug)
     if not store:

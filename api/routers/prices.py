@@ -4,7 +4,7 @@ from math import ceil
 from typing import Annotated
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Response, status
-from pydantic import ConfigDict
+from pydantic import ConfigDict, field_validator
 from sqlalchemy import func
 from sqlmodel import SQLModel, Session, delete, select
 
@@ -23,6 +23,13 @@ class PriceCreate(SQLModel):
     is_available: bool = True
     last_checked_at: datetime | None = None
 
+    @field_validator("url")
+    @classmethod
+    def validate_url(cls, v: str) -> str:
+        if not v.startswith(("http://", "https://")):
+            raise ValueError("URL must start with http:// or https://")
+        return v
+
 
 class PriceUpdate(SQLModel):
     product_id: int | None = None
@@ -32,6 +39,13 @@ class PriceUpdate(SQLModel):
     url: str | None = None
     is_available: bool | None = None
     last_checked_at: datetime | None = None
+
+    @field_validator("url")
+    @classmethod
+    def validate_url(cls, v: str | None) -> str | None:
+        if v is not None and not v.startswith(("http://", "https://")):
+            raise ValueError("URL must start with http:// or https://")
+        return v
 
 
 class PriceRead(SQLModel):
@@ -211,7 +225,7 @@ def create_price(payload: PriceCreate, session: SessionDep) -> PriceRead:
     return PriceRead.model_validate(price)
 
 
-@router.put("/prices/{price_id}", response_model=PriceRead)
+@router.patch("/prices/{price_id}", response_model=PriceRead)
 def update_price(price_id: int, payload: PriceUpdate, session: SessionDep) -> PriceRead:
     price = _get_price_by_id(session, price_id)
     if not price:
