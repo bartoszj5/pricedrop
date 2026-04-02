@@ -1,8 +1,15 @@
 import { notFound } from "next/navigation";
 import Link from "next/link";
-import { ArrowLeft, ExternalLink, CheckCircle, XCircle } from "lucide-react";
+import {
+  ArrowLeft,
+  ArrowUpRight,
+  CheckCircle2,
+  ExternalLink,
+  Store as StoreIcon,
+  XCircle,
+} from "lucide-react";
 import { getStore, getPrices } from "../../lib/api";
-import { formatPrice, timeAgo } from "../../lib/utils";
+import { formatPrice, getDomainLabel, timeAgo } from "../../lib/utils";
 import EmptyState from "../../components/EmptyState";
 import type { Metadata } from "next";
 
@@ -33,119 +40,181 @@ export default async function StoreDetailPage({ params }: PageProps) {
   }
 
   const pricesData = await getPrices({ store_slug: slug, page_size: 100 });
+  const activeOffers = pricesData.items.filter((price) => price.is_available);
+  const inactiveOffers = pricesData.items.filter((price) => !price.is_available);
 
   return (
-    <div className="flex flex-1 overflow-hidden">
-      <main className="flex-1 flex flex-col gap-8 p-7 px-8 overflow-y-auto max-w-5xl mx-auto w-full">
-        {/* Back */}
+    <main className="page-shell flex max-w-6xl flex-col gap-8">
         <Link
           href="/stores"
-          className="flex items-center gap-2 text-sm text-text-muted hover:text-text-primary transition-colors w-fit"
+          className="flex w-fit items-center gap-2 text-sm font-semibold text-text-muted hover:text-text-primary"
         >
-          <ArrowLeft className="w-4 h-4" />
+          <ArrowLeft className="h-4 w-4" />
           Wróć do sklepów
         </Link>
 
-        {/* Store Header */}
-        <div className="flex items-center justify-between p-6 bg-bg-card rounded-xl border border-border">
-          <div className="flex flex-col gap-2">
-            <h1 className="text-3xl font-bold text-text-primary">
+        <section className="section-card grid gap-6 p-6 md:p-8 lg:grid-cols-[1.1fr_0.9fr]">
+          <div className="relative z-10 flex flex-col gap-4">
+            <span className="eyebrow">Profil sklepu</span>
+            <h1 className="display-title text-5xl text-text-primary md:text-6xl">
               {store.name}
             </h1>
+            <p className="max-w-2xl text-base leading-7 text-text-secondary">
+              {getDomainLabel(store.url)} jest jednym z kanałów widocznych w
+              katalogu PriceDrop. Widok sklepu promuje realne oferty, a pozycje
+              bez aktywnej dostępności traktuje jako materiał drugorzędny.
+            </p>
             <a
               href={store.url}
               target="_blank"
               rel="noopener noreferrer"
-              className="flex items-center gap-1.5 text-sm text-accent-blue hover:underline"
+              className="inline-flex w-fit items-center gap-2 rounded-full border border-border bg-bg-card px-5 py-3 text-sm font-semibold text-text-primary hover:-translate-y-0.5 hover:border-accent/40"
             >
-              <ExternalLink className="w-4 h-4" />
-              {store.url}
+              Odwiedź sklep
+              <ExternalLink className="h-4 w-4" />
             </a>
           </div>
-          <div className="flex items-center gap-2">
-            {store.is_active ? (
-              <>
-                <CheckCircle className="w-5 h-5 text-accent-green" />
-                <span className="text-sm font-medium text-accent-green">
-                  Aktywny
-                </span>
-              </>
-            ) : (
-              <>
-                <XCircle className="w-5 h-5 text-text-muted" />
-                <span className="text-sm font-medium text-text-muted">
-                  Nieaktywny
-                </span>
-              </>
-            )}
+
+          <div className="grid gap-3 sm:grid-cols-3">
+            <div className="section-subtle p-5">
+              <p className="text-xs font-semibold uppercase tracking-[0.16em] text-text-muted">
+                Status
+              </p>
+              <div className="mt-2 inline-flex items-center gap-2 text-sm font-semibold">
+                {store.is_active ? (
+                  <>
+                    <CheckCircle2 className="h-4 w-4 text-accent-green" />
+                    <span className="text-accent-green">Aktywny</span>
+                  </>
+                ) : (
+                  <>
+                    <XCircle className="h-4 w-4 text-text-muted" />
+                    <span className="text-text-muted">Nieaktywny</span>
+                  </>
+                )}
+              </div>
+            </div>
+            <div className="section-subtle p-5">
+              <p className="text-xs font-semibold uppercase tracking-[0.16em] text-text-muted">
+                Aktywne oferty
+              </p>
+              <p className="mt-2 text-4xl text-accent-green">{activeOffers.length}</p>
+            </div>
+            <div className="section-subtle p-5">
+              <p className="text-xs font-semibold uppercase tracking-[0.16em] text-text-muted">
+                Wszystkie rekordy cen
+              </p>
+              <p className="mt-2 text-4xl text-text-primary">{pricesData.total}</p>
+            </div>
           </div>
-        </div>
+        </section>
 
-        {/* Products at this store */}
         <section className="flex flex-col gap-4">
-          <h2 className="text-lg font-semibold text-text-primary">
-            Produkty ({pricesData.total})
-          </h2>
+          <div className="flex flex-col gap-1">
+            <span className="eyebrow">Sekcja główna</span>
+            <h2 className="text-3xl text-text-primary">Aktywne oferty tego sklepu</h2>
+          </div>
 
-          {pricesData.items.length > 0 ? (
-            <div className="overflow-hidden rounded-xl border border-border">
-              <table className="w-full text-sm">
-                <thead>
-                  <tr className="bg-bg-tertiary text-text-muted text-xs font-semibold">
-                    <th className="text-left px-4 py-3">Produkt</th>
-                    <th className="text-left px-4 py-3">Cena</th>
-                    <th className="text-left px-4 py-3">Dostępność</th>
-                    <th className="text-left px-4 py-3">Sprawdzono</th>
-                    <th className="text-left px-4 py-3">Link</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {pricesData.items.map((price) => (
-                    <tr key={price.id} className="border-t border-border">
-                      <td className="px-4 py-3">
-                        <Link
-                          href={`/products/${price.product_slug}`}
-                          className="font-medium text-text-primary hover:text-accent-blue transition-colors"
-                        >
-                          {price.product_slug}
-                        </Link>
-                      </td>
-                      <td className="px-4 py-3 font-bold text-text-primary">
-                        {formatPrice(price.current_price, price.currency)}
-                      </td>
-                      <td className="px-4 py-3">
-                        {price.is_available ? (
-                          <span className="text-accent-green text-xs">Dostępny</span>
-                        ) : (
-                          <span className="text-text-muted text-xs">Niedostępny</span>
-                        )}
-                      </td>
-                      <td className="px-4 py-3 text-text-muted text-xs">
-                        {price.last_checked_at
-                          ? timeAgo(price.last_checked_at)
-                          : "-"}
-                      </td>
-                      <td className="px-4 py-3">
-                        <a
-                          href={price.url}
-                          target="_blank"
-                          rel="noopener noreferrer"
-                          className="flex items-center gap-1 text-accent-blue hover:underline text-xs"
-                        >
-                          <ExternalLink className="w-3.5 h-3.5" />
-                          Kup
-                        </a>
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
+          {activeOffers.length > 0 ? (
+            <div className="grid gap-4">
+              {activeOffers.map((price) => (
+                <article
+                  key={price.id}
+                  className="section-subtle flex flex-col gap-4 p-5 lg:grid lg:grid-cols-[1.4fr_0.6fr_0.55fr_0.55fr_auto] lg:items-center"
+                >
+                  <div className="flex items-start gap-3">
+                    <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-full border border-border bg-bg-card text-accent">
+                      <StoreIcon className="h-5 w-5" />
+                    </div>
+                    <div>
+                      <Link
+                        href={`/products/${price.product_slug}`}
+                        className="text-xl leading-tight text-text-primary hover:text-accent"
+                      >
+                        {price.product_title ?? price.product_slug}
+                      </Link>
+                      <p className="mt-1 text-sm text-text-secondary">
+                        {price.product_slug}
+                      </p>
+                    </div>
+                  </div>
+
+                  <div>
+                    <p className="text-xs font-semibold uppercase tracking-[0.16em] text-text-muted">
+                      Cena
+                    </p>
+                    <p className="mt-2 text-2xl text-accent-green">
+                      {formatPrice(price.current_price, price.currency)}
+                    </p>
+                  </div>
+
+                  <div>
+                    <p className="text-xs font-semibold uppercase tracking-[0.16em] text-text-muted">
+                      Dostępność
+                    </p>
+                    <p className="mt-2 text-sm font-semibold text-accent-green">
+                      Dostępny
+                    </p>
+                  </div>
+
+                  <div>
+                    <p className="text-xs font-semibold uppercase tracking-[0.16em] text-text-muted">
+                      Ostatnie sprawdzenie
+                    </p>
+                    <p className="mt-2 text-sm text-text-secondary">
+                      {price.last_checked_at ? timeAgo(price.last_checked_at) : "Brak"}
+                    </p>
+                  </div>
+
+                  <a
+                    href={price.url}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="inline-flex items-center gap-2 rounded-full border border-border bg-bg-card px-4 py-2 text-sm font-semibold text-text-primary hover:-translate-y-0.5 hover:border-accent/40"
+                  >
+                    Kup teraz
+                    <ArrowUpRight className="h-4 w-4" />
+                  </a>
+                </article>
+              ))}
             </div>
           ) : (
-            <EmptyState message="Brak produktów w tym sklepie" />
+            <EmptyState
+              message="Ten sklep nie ma jeszcze aktywnych ofert w katalogu"
+              detail="Profil sklepu pozostaje widoczny, ale w tej chwili nie ma żadnych rekordów z realną ceną do wyświetlenia."
+            />
           )}
         </section>
-      </main>
-    </div>
+
+        {inactiveOffers.length > 0 && (
+          <section className="flex flex-col gap-4">
+            <div className="flex flex-col gap-1">
+              <span className="eyebrow">Sekcja pomocnicza</span>
+              <h2 className="text-3xl text-text-primary">Rekordy drugorzędne</h2>
+              <p className="text-sm leading-6 text-text-secondary">
+                Pozycje bez aktywnej dostępności są schowane niżej, żeby nie
+                rozmywać głównego widoku ofert.
+              </p>
+            </div>
+
+            <div className="grid gap-3">
+              {inactiveOffers.map((price) => (
+                <div
+                  key={price.id}
+                  className="section-subtle flex flex-col gap-2 p-4 md:flex-row md:items-center md:justify-between"
+                >
+                  <div>
+                    <p className="font-semibold text-text-primary">
+                      {price.product_title ?? price.product_slug}
+                    </p>
+                    <p className="text-sm text-text-secondary">{price.product_slug}</p>
+                  </div>
+                  <p className="text-sm font-semibold text-text-muted">Niedostępny</p>
+                </div>
+              ))}
+            </div>
+          </section>
+        )}
+    </main>
   );
 }

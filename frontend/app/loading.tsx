@@ -2,17 +2,14 @@ import { SkeletonCard } from "./components/Skeleton";
 
 export default function Loading() {
   return (
-    <div className="flex flex-1 overflow-hidden">
-      {/* Sidebar skeleton */}
-      <aside className="w-[260px] shrink-0 bg-bg-secondary" />
-      <div className="w-px bg-border" />
-      <main className="flex-1 flex flex-col gap-6 p-7 px-8">
-        <div className="grid grid-cols-4 gap-4">
+    <main className="page-shell flex flex-col gap-6">
+      <div className="section-card h-[260px]" />
+      <div className="section-card h-[180px]" />
+      <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
           {Array.from({ length: 8 }).map((_, i) => (
             <SkeletonCard key={i} />
           ))}
-        </div>
-      </main>
-    </div>
+      </div>
+    </main>
   );
 }

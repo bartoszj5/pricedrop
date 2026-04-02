@@ -26,3 +26,11 @@ export function timeAgo(iso: string): string {
   if (days < 30) return `${days} dni temu`;
   return formatDate(iso);
 }
+
+export function getDomainLabel(url: string): string {
+  try {
+    return new URL(url).hostname.replace(/^www\./, "");
+  } catch {
+    return url;
+  }
+}

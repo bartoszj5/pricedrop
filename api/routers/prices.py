@@ -64,6 +64,7 @@ class PriceRead(SQLModel):
 
 
 class PriceDetailRead(PriceRead):
+    product_title: str
     product_slug: str
     store_slug: str
     store_name: str
@@ -162,6 +163,7 @@ def list_prices(
             last_checked_at=price.last_checked_at,
             created_at=price.created_at,
             updated_at=price.updated_at,
+            product_title=product.title,
             product_slug=product.slug,
             store_slug=store.slug,
             store_name=store.name,
@@ -205,6 +207,7 @@ def get_price(price_id: int, session: SessionDep) -> PriceDetailRead:
         last_checked_at=price.last_checked_at,
         created_at=price.created_at,
         updated_at=price.updated_at,
+        product_title=product.title,
         product_slug=product.slug,
         store_slug=store.slug,
         store_name=store.name,

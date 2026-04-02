@@ -6,6 +6,7 @@ import type {
   StoreRead,
   PriceListResponse,
   ITADGameRead,
+  ProductSort,
 } from "../types";
 
 const API_BASES = process.env.INTERNAL_API_URL
@@ -39,11 +40,17 @@ async function fetchServer<T>(path: string, revalidate = 60): Promise<T> {
 
 export async function getProducts(params: {
   search?: string;
+  category?: string;
+  store?: string;
+  sort?: ProductSort;
   page?: number;
   page_size?: number;
 } = {}): Promise<ProductWithPricesListResponse> {
   const sp = new URLSearchParams();
   if (params.search) sp.set("search", params.search);
+  if (params.category) sp.set("category", params.category);
+  if (params.store) sp.set("store", params.store);
+  if (params.sort) sp.set("sort", params.sort);
   if (params.page) sp.set("page", String(params.page));
   if (params.page_size) sp.set("page_size", String(params.page_size));
   const qs = sp.toString();
@@ -103,7 +110,19 @@ export async function searchITAD(
   const sp = new URLSearchParams({ title, results: String(results) });
   const res = await fetch(`/api/itad/search?${sp}`);
   if (!res.ok) {
-    throw new Error(`ITAD search error: ${res.status}`);
+    let detail = `ITAD search error: ${res.status}`;
+    try {
+      const payload = await res.json();
+      if (payload && typeof payload.detail === "string") {
+        detail = payload.detail;
+      }
+    } catch {
+      // Ignore JSON parsing failures and keep fallback detail.
+    }
+
+    const error = new Error(detail) as Error & { status?: number };
+    error.status = res.status;
+    throw error;
   }
   return res.json();
 }

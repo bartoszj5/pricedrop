@@ -2,7 +2,7 @@
 
 import { ChevronLeft, ChevronRight } from "lucide-react";
 import Link from "next/link";
-import { useSearchParams } from "next/navigation";
+import { usePathname, useSearchParams } from "next/navigation";
 
 interface PaginationProps {
   page: number;
@@ -10,6 +10,7 @@ interface PaginationProps {
 }
 
 export default function Pagination({ page, totalPages }: PaginationProps) {
+  const pathname = usePathname();
   const searchParams = useSearchParams();
 
   if (totalPages <= 1) return null;
@@ -21,7 +22,8 @@ export default function Pagination({ page, totalPages }: PaginationProps) {
     } else {
       params.delete("page");
     }
-    return `/?${params.toString()}`;
+    const query = params.toString();
+    return query ? `${pathname}?${query}` : pathname;
   }
 
   const pages: (number | "...")[] = [];
@@ -34,28 +36,28 @@ export default function Pagination({ page, totalPages }: PaginationProps) {
   }
 
   return (
-    <div className="flex items-center justify-center gap-1.5 pt-4">
+    <div className="flex flex-wrap items-center justify-center gap-2 pt-2">
       {page > 1 && (
         <Link
           href={buildHref(page - 1)}
-          className="flex items-center justify-center w-9 h-9 rounded-lg text-text-muted hover:bg-bg-tertiary hover:text-text-primary transition-colors"
+          className="flex h-11 w-11 items-center justify-center rounded-full border border-border bg-bg-card text-text-muted hover:-translate-y-0.5 hover:text-text-primary"
         >
           <ChevronLeft className="w-4 h-4" />
         </Link>
       )}
       {pages.map((p, i) =>
         p === "..." ? (
-          <span key={`dots-${i}`} className="w-9 h-9 flex items-center justify-center text-text-muted text-sm">
+          <span key={`dots-${i}`} className="flex h-11 w-11 items-center justify-center text-sm text-text-muted">
             ...
           </span>
         ) : (
           <Link
             key={p}
             href={buildHref(p)}
-            className={`flex items-center justify-center w-9 h-9 rounded-lg text-sm font-medium transition-colors ${
+            className={`flex h-11 min-w-11 items-center justify-center rounded-full border px-4 text-sm font-semibold ${
               p === page
-                ? "bg-accent-blue text-white"
-                : "text-text-secondary hover:bg-bg-tertiary hover:text-text-primary"
+                ? "border-accent bg-accent text-white"
+                : "border-border bg-bg-card text-text-secondary hover:-translate-y-0.5 hover:text-text-primary"
             }`}
           >
             {p}
@@ -65,7 +67,7 @@ export default function Pagination({ page, totalPages }: PaginationProps) {
       {page < totalPages && (
         <Link
           href={buildHref(page + 1)}
-          className="flex items-center justify-center w-9 h-9 rounded-lg text-text-muted hover:bg-bg-tertiary hover:text-text-primary transition-colors"
+          className="flex h-11 w-11 items-center justify-center rounded-full border border-border bg-bg-card text-text-muted hover:-translate-y-0.5 hover:text-text-primary"
         >
           <ChevronRight className="w-4 h-4" />
         </Link>

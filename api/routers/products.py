@@ -1,12 +1,11 @@
 from datetime import datetime, timezone
 from decimal import Decimal
 from math import ceil
-from typing import Annotated
+from typing import Annotated, Literal
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Response, status
 from pydantic import ConfigDict
-from sqlalchemy import func, or_
-from sqlalchemy.orm import aliased
+from sqlalchemy import case, func, or_
 from sqlmodel import SQLModel, Session, delete, select
 
 from shared.database import get_session
@@ -102,10 +101,14 @@ class ProductWithBestPriceRead(SQLModel):
     best_price_currency: str | None = None
     best_store_name: str | None = None
     best_store_slug: str | None = None
+    best_store_logo_url: str | None = None
+    available_offers_count: int = 0
+    tracked_stores_count: int = 0
 
 
 class ProductWithPricesListResponse(SQLModel):
     items: list[ProductWithBestPriceRead]
+    categories: list[str]
     total: int
     page: int
     page_size: int
@@ -113,6 +116,15 @@ class ProductWithPricesListResponse(SQLModel):
 
 
 router = APIRouter(tags=["products"])
+ProductSort = Literal[
+    "featured",
+    "price_asc",
+    "price_desc",
+    "title_asc",
+    "title_desc",
+    "newest",
+    "category",
+]
 
 
 def _get_product_by_slug(session: Session, slug: str) -> Product | None:
@@ -131,6 +143,42 @@ def _ensure_unique_product_slug(
             status_code=status.HTTP_409_CONFLICT,
             detail=f"Product with slug '{slug}' already exists.",
         )
+
+
+def _apply_product_filters(
+    statement,
+    *,
+    search: str | None = None,
+    category: str | None = None,
+    store: str | None = None,
+):
+    if search and search.strip():
+        pattern = f"%{search.strip()}%"
+        condition = or_(
+            Product.title.ilike(pattern),
+            Product.slug.ilike(pattern),
+            Product.category.ilike(pattern),
+        )
+        statement = statement.where(condition)
+
+    if category and category.strip():
+        statement = statement.where(Product.category == category.strip())
+
+    if store and store.strip():
+        normalized_store = store.strip()
+        statement = statement.where(
+            select(Price.id)
+            .join(Store, Price.store_id == Store.id)
+            .where(
+                Price.product_id == Product.id,
+                Store.slug == normalized_store,
+                Price.is_available == True,
+                Price.current_price.is_not(None),
+            )
+            .exists()
+        )
+
+    return statement
 
 
 @router.get("/products", response_model=ProductListResponse)
@@ -174,75 +222,127 @@ def list_products(
 def list_products_with_prices(
     session: SessionDep,
     search: Annotated[str | None, Query(max_length=255)] = None,
+    category: Annotated[str | None, Query(max_length=50)] = None,
+    store: Annotated[str | None, Query(max_length=100)] = None,
+    sort: ProductSort = "featured",
     page: Annotated[int, Query(ge=1)] = 1,
     page_size: Annotated[int, Query(ge=1, le=100)] = 20,
 ) -> ProductWithPricesListResponse:
-    query = select(Product)
-    count_query = select(func.count()).select_from(Product)
+    available_condition = (Price.is_available == True) & Price.current_price.is_not(None)
 
-    if search and search.strip():
-        pattern = f"%{search.strip()}%"
-        condition = or_(
-            Product.title.ilike(pattern),
-            Product.slug.ilike(pattern),
-            Product.category.ilike(pattern),
+    ranked_best_prices = (
+        select(
+            Price.product_id.label("product_id"),
+            Price.current_price.label("best_price"),
+            Price.currency.label("currency"),
+            Store.name.label("store_name"),
+            Store.slug.label("store_slug"),
+            Store.logo_url.label("store_logo_url"),
+            func.row_number()
+            .over(
+                partition_by=Price.product_id,
+                order_by=Price.current_price.asc(),
+            )
+            .label("rn"),
         )
-        query = query.where(condition)
-        count_query = count_query.where(condition)
+        .join(Store, Price.store_id == Store.id)
+        .where(available_condition)
+        .subquery()
+    )
+
+    price_stats = (
+        select(
+            Price.product_id.label("product_id"),
+            func.sum(case((available_condition, 1), else_=0)).label(
+                "available_offers_count"
+            ),
+        )
+        .group_by(Price.product_id)
+        .subquery()
+    )
+
+    count_query = _apply_product_filters(
+        select(func.count()).select_from(Product),
+        search=search,
+        category=category,
+        store=store,
+    )
+    categories_query = _apply_product_filters(
+        select(Product.category).distinct(),
+        search=search,
+        store=store,
+    ).order_by(Product.category.asc())
+
+    available_offers_count = func.coalesce(price_stats.c.available_offers_count, 0)
+    best_price = ranked_best_prices.c.best_price
+    best_price_missing = case((best_price.is_(None), 1), else_=0)
+    # Recreate the filtered product subquery for stable column access in joins.
+    filtered_products = _apply_product_filters(
+        select(Product.id),
+        search=search,
+        category=category,
+        store=store,
+    ).subquery()
+    query = (
+        select(
+            Product,
+            ranked_best_prices.c.best_price,
+            ranked_best_prices.c.currency,
+            ranked_best_prices.c.store_name,
+            ranked_best_prices.c.store_slug,
+            ranked_best_prices.c.store_logo_url,
+            available_offers_count.label("available_offers_count"),
+        )
+        .join(filtered_products, filtered_products.c.id == Product.id)
+        .outerjoin(price_stats, price_stats.c.product_id == Product.id)
+        .outerjoin(
+            ranked_best_prices,
+            (ranked_best_prices.c.product_id == Product.id)
+            & (ranked_best_prices.c.rn == 1),
+        )
+    )
+
+    if sort == "price_asc":
+        query = query.order_by(best_price_missing.asc(), best_price.asc(), Product.title.asc())
+    elif sort == "price_desc":
+        query = query.order_by(
+            best_price_missing.asc(),
+            best_price.desc(),
+            Product.title.asc(),
+        )
+    elif sort == "title_desc":
+        query = query.order_by(Product.title.desc())
+    elif sort == "newest":
+        query = query.order_by(Product.created_at.desc(), Product.title.asc())
+    elif sort == "category":
+        query = query.order_by(Product.category.asc(), Product.title.asc())
+    elif sort == "title_asc":
+        query = query.order_by(Product.title.asc())
+    else:
+        query = query.order_by(
+            best_price_missing.asc(),
+            best_price.asc(),
+            Product.updated_at.desc(),
+            Product.title.asc(),
+        )
 
     total = session.exec(count_query).one()
-    products = session.exec(
-        query
-        .order_by(Product.title.asc())
-        .offset((page - 1) * page_size)
-        .limit(page_size)
+    categories = session.exec(categories_query).all()
+    tracked_stores_count = session.exec(select(func.count()).select_from(Store)).one()
+    rows = session.exec(
+        query.offset((page - 1) * page_size).limit(page_size)
     ).all()
 
-    product_ids = [p.id for p in products]
-
-    best_prices: dict[int, tuple[Decimal, str, str, str]] = {}
-    if product_ids:
-        # Subquery: rank prices per product by current_price ascending
-        ranked = (
-            select(
-                Price.product_id,
-                Price.current_price,
-                Price.currency,
-                Store.name.label("store_name"),
-                Store.slug.label("store_slug"),
-                func.row_number()
-                .over(
-                    partition_by=Price.product_id,
-                    order_by=Price.current_price.asc(),
-                )
-                .label("rn"),
-            )
-            .join(Store, Price.store_id == Store.id)
-            .where(Price.product_id.in_(product_ids), Price.is_available == True)
-            .subquery()
-        )
-
-        rows = session.exec(
-            select(
-                ranked.c.product_id,
-                ranked.c.current_price,
-                ranked.c.currency,
-                ranked.c.store_name,
-                ranked.c.store_slug,
-            ).where(ranked.c.rn == 1)
-        ).all()
-
-        for row in rows:
-            best_prices[row.product_id] = (
-                row.current_price,
-                row.currency,
-                row.store_name,
-                row.store_slug,
-            )
-
     items = []
-    for product in products:
-        bp = best_prices.get(product.id)
+    for (
+        product,
+        best_price_value,
+        currency,
+        store_name,
+        store_slug,
+        store_logo_url,
+        available_offers_count_value,
+    ) in rows:
         items.append(
             ProductWithBestPriceRead(
                 id=product.id,
@@ -254,15 +354,19 @@ def list_products_with_prices(
                 release_date=product.release_date,
                 created_at=product.created_at,
                 updated_at=product.updated_at,
-                best_price=bp[0] if bp else None,
-                best_price_currency=bp[1] if bp else None,
-                best_store_name=bp[2] if bp else None,
-                best_store_slug=bp[3] if bp else None,
+                best_price=best_price_value,
+                best_price_currency=currency,
+                best_store_name=store_name,
+                best_store_slug=store_slug,
+                best_store_logo_url=store_logo_url,
+                available_offers_count=int(available_offers_count_value or 0),
+                tracked_stores_count=int(tracked_stores_count),
             )
         )
 
     return ProductWithPricesListResponse(
         items=items,
+        categories=categories,
         total=total,
         page=page,
         page_size=page_size,

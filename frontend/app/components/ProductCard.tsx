@@ -1,4 +1,5 @@
 import Link from "next/link";
+import { ArrowUpRight, Radar, Store as StoreIcon, Tag } from "lucide-react";
 import type { ProductWithBestPrice } from "../types";
 import { formatPrice } from "../lib/utils";
 
@@ -7,54 +8,116 @@ interface ProductCardProps {
 }
 
 export default function ProductCard({ product }: ProductCardProps) {
+  const hasActiveOffer = product.best_price != null;
+  const availableOffersCount = product.available_offers_count ?? 0;
+  const trackedStoresCount = product.tracked_stores_count ?? 0;
+
   return (
     <Link
       href={`/products/${product.slug}`}
-      className="flex flex-col bg-bg-card rounded-xl overflow-hidden hover:ring-1 hover:ring-border transition-all"
+      className="group flex h-full flex-col overflow-hidden rounded-[30px] border border-border bg-bg-card shadow-[var(--shadow-card)] hover:-translate-y-1 hover:border-accent/30"
     >
-      {/* Image */}
-      <div className="w-full h-[140px] bg-bg-tertiary overflow-hidden">
+      <div className="relative aspect-[4/3] w-full overflow-hidden bg-bg-tertiary">
         {product.image_url ? (
           <img
             src={product.image_url}
             alt={product.title}
-            className="w-full h-full object-cover"
+            className="h-full w-full object-cover transition-transform duration-300 group-hover:scale-[1.03]"
           />
         ) : (
-          <div className="w-full h-full flex items-center justify-center text-text-muted text-sm">
+          <div className="flex h-full w-full items-center justify-center text-sm text-text-muted">
             Brak obrazka
           </div>
         )}
-      </div>
 
-      {/* Body */}
-      <div className="flex flex-col gap-2.5 p-3.5">
-        {/* Tags */}
-        <div className="flex gap-1.5">
-          <span className="flex items-center h-[22px] px-2 rounded-md bg-bg-tertiary text-[10px] font-medium text-text-muted">
+        <div className="absolute left-4 top-4 flex max-w-[calc(100%-2rem)] flex-wrap gap-2">
+          <span className="paper-chip bg-bg-secondary/90">
+            <Tag className="h-3.5 w-3.5" />
             {product.category}
           </span>
-          {product.best_store_name && (
-            <span className="flex items-center h-[22px] px-2 rounded-md bg-bg-tertiary text-[10px] font-medium text-text-muted">
+          <span
+            className={`paper-chip ${
+              hasActiveOffer
+                ? "border-transparent bg-accent-green-soft text-accent-green"
+                : "bg-bg-secondary/90 text-text-secondary"
+            }`}
+          >
+            {hasActiveOffer ? "Aktywna oferta" : "W monitoringu"}
+          </span>
+        </div>
+      </div>
+
+      <div className="flex flex-1 flex-col gap-4 p-5">
+        <div className="flex flex-col gap-2">
+          <h3 className="two-line-clamp text-[1.28rem] leading-tight text-text-primary">
+            {product.title}
+          </h3>
+          {product.best_store_name ? (
+            <div className="inline-flex w-fit items-center gap-2 rounded-full border border-border bg-bg-secondary px-3 py-1.5 text-xs font-semibold text-text-secondary">
+              {product.best_store_logo_url ? (
+                <img
+                  src={product.best_store_logo_url}
+                  alt={product.best_store_name}
+                  className="h-4 w-4 object-contain"
+                />
+              ) : (
+                <StoreIcon className="h-3.5 w-3.5" />
+              )}
               {product.best_store_name}
-            </span>
+            </div>
+          ) : (
+            <p className="text-sm text-text-secondary">
+              Monitorujemy rynek i czekamy na pierwszą potwierdzoną cenę.
+            </p>
           )}
         </div>
 
-        {/* Title */}
-        <h3 className="text-[15px] font-semibold text-text-primary truncate">
-          {product.title}
-        </h3>
+        <div className="grid grid-cols-2 gap-3 text-sm">
+          <div className="rounded-[22px] border border-border bg-bg-secondary px-4 py-3">
+            <p className="text-xs font-semibold uppercase tracking-[0.16em] text-text-muted">
+              Aktywne oferty
+            </p>
+            <p className="mt-2 text-xl font-semibold text-text-primary">
+              {availableOffersCount}
+            </p>
+          </div>
+          <div className="rounded-[22px] border border-border bg-bg-secondary px-4 py-3">
+            <p className="text-xs font-semibold uppercase tracking-[0.16em] text-text-muted">
+              Monitoring
+            </p>
+            <p className="mt-2 text-xl font-semibold text-text-primary">
+              {trackedStoresCount} sklepów
+            </p>
+          </div>
+        </div>
 
-        {/* Price Row */}
-        <div className="flex items-center justify-between">
-          {product.best_price != null ? (
-            <span className="text-lg font-bold text-text-primary">
-              {formatPrice(product.best_price, product.best_price_currency ?? "PLN")}
-            </span>
-          ) : (
-            <span className="text-sm text-text-muted">Brak cen</span>
-          )}
+        <div className="mt-auto flex items-end justify-between gap-3 border-t border-border/80 pt-4">
+          <div>
+            {hasActiveOffer ? (
+              <>
+                <p className="text-xs font-semibold uppercase tracking-[0.16em] text-text-muted">
+                  Najlepsza cena
+                </p>
+                <p className="mt-2 text-3xl leading-none text-accent-green">
+                  {formatPrice(product.best_price!, product.best_price_currency ?? "PLN")}
+                </p>
+              </>
+            ) : (
+              <>
+                <p className="text-xs font-semibold uppercase tracking-[0.16em] text-text-muted">
+                  Status
+                </p>
+                <div className="mt-2 inline-flex items-center gap-2 text-sm font-semibold text-text-secondary">
+                  <Radar className="h-4 w-4 text-accent" />
+                  Brak aktywnej oferty
+                </div>
+              </>
+            )}
+          </div>
+
+          <div className="inline-flex h-11 w-11 items-center justify-center rounded-full border border-border bg-bg-secondary text-text-primary group-hover:border-accent/40 group-hover:text-accent">
+            <ArrowUpRight className="h-4 w-4" />
+          </div>
         </div>
       </div>
     </Link>

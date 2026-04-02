@@ -13,14 +13,14 @@ import {
 import type { ProductPriceHistoryRead } from "../types";
 
 const STORE_COLORS = [
-  "#6366F1",
-  "#4ADE80",
-  "#F87171",
-  "#FBBF24",
-  "#38BDF8",
-  "#A78BFA",
-  "#FB923C",
-  "#F472B6",
+  "#ad4d2e",
+  "#1c7b62",
+  "#2f5d7c",
+  "#c9912b",
+  "#7a4a8f",
+  "#d26c4b",
+  "#355f48",
+  "#516987",
 ];
 
 interface PriceHistoryChartProps {
@@ -70,22 +70,22 @@ export default function PriceHistoryChart({ history }: PriceHistoryChartProps) {
         <CartesianGrid strokeDasharray="3 3" stroke="#2D3148" />
         <XAxis
           dataKey="date"
-          stroke="#64748B"
+          stroke="#7a796f"
           tick={{ fontSize: 12 }}
         />
         <YAxis
-          stroke="#64748B"
+          stroke="#7a796f"
           tick={{ fontSize: 12 }}
           tickFormatter={(v: number) => `${v} zł`}
         />
         <Tooltip
           contentStyle={{
-            backgroundColor: "#1E2130",
-            border: "1px solid #2D3148",
-            borderRadius: "8px",
+            backgroundColor: "#fffaf2",
+            border: "1px solid #dacdb7",
+            borderRadius: "16px",
             fontSize: "13px",
           }}
-          labelStyle={{ color: "#94A3B8" }}
+          labelStyle={{ color: "#556072" }}
           formatter={(value) => [`${Number(value).toFixed(2)} zł`]}
         />
         <Legend wrapperStyle={{ fontSize: "13px" }} />

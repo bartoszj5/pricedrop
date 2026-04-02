@@ -1,11 +1,24 @@
 import type { Metadata } from "next";
+import { Fraunces, Manrope } from "next/font/google";
 import { Suspense } from "react";
 import Navbar from "./components/Navbar";
 import "./globals.css";
 
+const displayFont = Fraunces({
+  subsets: ["latin"],
+  weight: ["600", "700", "800"],
+  variable: "--font-editorial",
+});
+
+const bodyFont = Manrope({
+  subsets: ["latin"],
+  weight: ["400", "500", "600", "700", "800"],
+  variable: "--font-ui",
+});
+
 export const metadata: Metadata = {
   title: "PriceDrop",
-  description: "Znajdź najlepsze okazje cenowe na gry, elektronikę i więcej",
+  description: "Katalog okazji i monitoring cen dla elektroniki, gier i akcesoriów.",
 };
 
 export default function RootLayout({
@@ -15,18 +28,11 @@ export default function RootLayout({
 }) {
   return (
     <html lang="pl">
-      <head>
-        <link
-          href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap"
-          rel="stylesheet"
-        />
-      </head>
-      <body className="antialiased">
-        <div className="flex flex-col h-screen overflow-hidden">
+      <body className={`${displayFont.variable} ${bodyFont.variable} antialiased`}>
+        <div className="min-h-screen">
           <Suspense>
             <Navbar />
           </Suspense>
-          <div className="h-px w-full bg-border" />
           {children}
         </div>
       </body>

@@ -15,10 +15,14 @@ export interface ProductWithBestPrice extends Product {
   best_price_currency: string | null;
   best_store_name: string | null;
   best_store_slug: string | null;
+  best_store_logo_url: string | null;
+  available_offers_count: number;
+  tracked_stores_count: number;
 }
 
 export interface ProductWithPricesListResponse {
   items: ProductWithBestPrice[];
+  categories: string[];
   total: number;
   page: number;
   page_size: number;
@@ -88,6 +92,7 @@ export interface PriceDetailRead {
   last_checked_at: string | null;
   created_at: string;
   updated_at: string;
+  product_title: string;
   product_slug: string;
   store_slug: string;
   store_name: string;
@@ -117,3 +122,12 @@ export interface ITADGameRead {
   mature: boolean;
   image_url: string | null;
 }
+
+export type ProductSort =
+  | "featured"
+  | "price_asc"
+  | "price_desc"
+  | "title_asc"
+  | "title_desc"
+  | "newest"
+  | "category";

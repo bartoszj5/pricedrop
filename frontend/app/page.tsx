@@ -1,12 +1,10 @@
-import { Suspense } from "react";
 import { getProducts, getStores } from "./lib/api";
-import Sidebar from "./components/Sidebar";
+import CatalogControls from "./components/CatalogControls";
 import FeaturedBanner from "./components/FeaturedBanner";
 import ProductCard from "./components/ProductCard";
 import Pagination from "./components/Pagination";
-import SortDropdown from "./components/SortDropdown";
 import EmptyState from "./components/EmptyState";
-import type { ProductWithBestPrice } from "./types";
+import type { ProductSort, ProductWithBestPrice } from "./types";
 
 interface PageProps {
   searchParams: Promise<{ [key: string]: string | string[] | undefined }>;
@@ -18,76 +16,157 @@ export default async function Home({ searchParams }: PageProps) {
   const page = typeof params.page === "string" ? parseInt(params.page, 10) || 1 : 1;
   const category = typeof params.category === "string" ? params.category : undefined;
   const store = typeof params.store === "string" ? params.store : undefined;
-
-  const searchQuery = [search, category].filter(Boolean).join(" ");
+  const sort = typeof params.sort === "string" ? params.sort : undefined;
 
   const [productsData, storesData] = await Promise.all([
-    getProducts({ search: searchQuery || undefined, page, page_size: 20 }),
+    getProducts({
+      search,
+      category,
+      store,
+      sort: sort as ProductSort | undefined,
+      page,
+      page_size: 24,
+    }),
     getStores({ page_size: 100 }),
   ]);
 
-  // Client-side store filter: the API search only filters by title/slug/category,
-  // so we filter by store on the server component level
-  let items = productsData.items;
-  if (store) {
-    items = items.filter((p) => p.best_store_slug === store);
-  }
-
-  // Extract unique categories from all products for sidebar
-  const categories = [...new Set(productsData.items.map((p) => p.category))].sort();
-
-  // Find product with lowest price for featured banner
+  const items = productsData.items;
+  const activeOffers = items.filter((product) => product.best_price != null);
+  const trackedOnly = items.filter((product) => product.best_price == null);
   const featured: ProductWithBestPrice | null =
-    items.reduce<ProductWithBestPrice | null>((best, p) => {
+    activeOffers.reduce<ProductWithBestPrice | null>((best, p) => {
       if (p.best_price == null) return best;
       if (!best || (best.best_price != null && p.best_price < best.best_price)) return p;
       return best;
     }, null);
 
+  const activeStoreName = store
+    ? storesData.items.find((entry) => entry.slug === store)?.name ?? store
+    : null;
+  const title = search
+    ? `Wyniki dla "${search}"`
+    : category
+      ? `Kategoria: ${category}`
+      : "Katalog okazji i monitoringu";
+  const subtitleParts = [
+    `${productsData.total} produktów`,
+    activeStoreName ? `aktywny sklep: ${activeStoreName}` : null,
+    sort ? `sortowanie: ${sort.replace("_", " ")}` : "tryb: najlepsze okazje",
+  ].filter(Boolean);
+
   return (
-    <div className="flex flex-1 overflow-hidden">
-      <Suspense>
-        <Sidebar stores={storesData.items} categories={categories} />
-      </Suspense>
-      <div className="w-px bg-border" />
-
-      <main className="flex-1 flex flex-col gap-6 p-7 px-8 overflow-y-auto">
-        {/* Header Row */}
-        <div className="flex items-center justify-between">
-          <div className="flex flex-col gap-1">
-            <h1 className="text-2xl font-bold text-text-primary">
-              {search ? `Wyniki: "${search}"` : "Najlepsze okazje"}
-            </h1>
-            <p className="text-[13px] text-text-muted">
-              {productsData.total} produktów
-            </p>
-          </div>
-          <Suspense>
-            <SortDropdown />
-          </Suspense>
-        </div>
-
-        {/* Featured Banner */}
-        {!search && !category && page === 1 && (
-          <FeaturedBanner product={featured} />
-        )}
-
-        {/* Product Grid */}
-        {items.length > 0 ? (
-          <div className="grid grid-cols-4 gap-4">
-            {items.map((product) => (
-              <ProductCard key={product.id} product={product} />
+    <main className="page-shell flex flex-col gap-6">
+      <section className="section-card grid gap-8 p-6 md:p-8 xl:grid-cols-[1.25fr_0.75fr]">
+        <div className="relative z-10 flex flex-col gap-4">
+          <span className="eyebrow">PriceDrop / szeroki katalog okazji</span>
+          <h1 className="display-title max-w-4xl text-5xl text-text-primary md:text-7xl">
+            {title}
+          </h1>
+          <p className="max-w-3xl text-base leading-7 text-text-secondary md:text-lg">
+            PriceDrop rozdziela produkty z realną ceną od tych, które są dopiero
+            w monitoringu. Dzięki temu nie przeglądasz atrap okazji, tylko
+            widzisz, gdzie rynek faktycznie już żyje.
+          </p>
+          <div className="flex flex-wrap gap-2 text-sm text-text-secondary">
+            {subtitleParts.map((part) => (
+              <span key={part} className="paper-chip">
+                {part}
+              </span>
             ))}
           </div>
-        ) : (
-          <EmptyState message="Nie znaleziono produktów" />
-        )}
+        </div>
 
-        {/* Pagination */}
-        <Suspense>
-          <Pagination page={page} totalPages={productsData.total_pages} />
-        </Suspense>
-      </main>
-    </div>
+        <div className="grid gap-3 sm:grid-cols-3 xl:grid-cols-1">
+          <div className="section-subtle p-5">
+            <p className="text-xs font-semibold uppercase tracking-[0.16em] text-text-muted">
+              Na tej stronie
+            </p>
+            <p className="mt-2 text-4xl text-text-primary">{items.length}</p>
+          </div>
+          <div className="section-subtle p-5">
+            <p className="text-xs font-semibold uppercase tracking-[0.16em] text-text-muted">
+              Aktywne okazje
+            </p>
+            <p className="mt-2 text-4xl text-accent-green">{activeOffers.length}</p>
+          </div>
+          <div className="section-subtle p-5">
+            <p className="text-xs font-semibold uppercase tracking-[0.16em] text-text-muted">
+              Produkty w monitoringu
+            </p>
+            <p className="mt-2 text-4xl text-text-primary">{trackedOnly.length}</p>
+          </div>
+        </div>
+      </section>
+
+      <CatalogControls
+        stores={storesData.items}
+        categories={productsData.categories ?? []}
+      />
+
+      {page === 1 && (
+        <FeaturedBanner
+          product={featured}
+          trackedStoresCount={storesData.total}
+        />
+      )}
+
+      {items.length === 0 ? (
+        <EmptyState
+          message="Brak produktów dla tego zestawu filtrów"
+          detail="Spróbuj zmienić kategorię, sklep albo frazę wyszukiwania. Katalog rozdziela aktywne oferty od monitoringu, więc przy ostrych filtrach wynik może być pusty."
+          actionHref="/"
+          actionLabel="Wróć do pełnego katalogu"
+        />
+      ) : (
+        <>
+          <section className="flex flex-col gap-4">
+            <div className="flex flex-col gap-1">
+              <span className="eyebrow">Sekcja pierwsza</span>
+              <h2 className="text-3xl text-text-primary">Najlepsze oferty teraz</h2>
+              <p className="text-sm leading-6 text-text-secondary">
+                Produkty z potwierdzoną ceną i aktywną ofertą sprzedaży.
+              </p>
+            </div>
+            {activeOffers.length > 0 ? (
+              <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
+                {activeOffers.map((product) => (
+                  <ProductCard key={product.id} product={product} />
+                ))}
+              </div>
+            ) : (
+              <EmptyState
+                message="Na tej stronie nie ma jeszcze aktywnych ofert"
+                detail="Filtry zawęziły katalog do produktów, które są obecnie tylko monitorowane. To uczciwy stan danych, nie brak renderu."
+              />
+            )}
+          </section>
+
+          <section className="flex flex-col gap-4">
+            <div className="flex flex-col gap-1">
+              <span className="eyebrow">Sekcja druga</span>
+              <h2 className="text-3xl text-text-primary">Produkty w monitoringu</h2>
+              <p className="text-sm leading-6 text-text-secondary">
+                Rekordy bez aktywnej oferty, ale już przygotowane pod śledzenie
+                cen w wielu sklepach.
+              </p>
+            </div>
+            {trackedOnly.length > 0 ? (
+              <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
+                {trackedOnly.map((product) => (
+                  <ProductCard key={product.id} product={product} />
+                ))}
+              </div>
+            ) : (
+              <EmptyState
+                message="Wszystkie produkty z tej strony mają aktywną ofertę"
+                detail="W tym zestawie wyników monitoring bez ceny nie był potrzebny, bo cały widoczny wycinek katalogu ma już aktywne oferty."
+              />
+            )}
+          </section>
+        </>
+      )}
+
+      <Pagination page={page} totalPages={productsData.total_pages} />
+    </main>
   );
 }
