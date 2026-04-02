@@ -30,6 +30,7 @@ func main() {
 	registry := NewScraperRegistry()
 	registry.Register("x-kom", NewXKomScraper(cfg.UserAgent, cfg.RequestDelay))
 	registry.Register("mediaexpert", NewMediaExpertScraper(cfg.UserAgent, cfg.RequestDelay))
+	registry.Register("morele", NewMoreleScraper(cfg.UserAgent, cfg.RequestDelay))
 
 	app := &App{
 		config:   cfg,
@@ -235,6 +236,9 @@ func (app *App) handleScrapeTest(w http.ResponseWriter, r *http.Request) {
 	}
 	if strings.Contains(productURL, "mediaexpert.pl") {
 		scraper, _ = app.registry.Get("mediaexpert")
+	}
+	if strings.Contains(productURL, "morele.net") {
+		scraper, _ = app.registry.Get("morele")
 	}
 
 	if scraper == nil {
