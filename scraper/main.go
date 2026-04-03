@@ -492,7 +492,7 @@ func (app *App) crawlStoreCategory(storeSlug, category, categoryURL string, maxP
 			currency = "PLN"
 		}
 
-		productSlug := slugify(title)
+		productSlug := slugify(normalizeTitle(title))
 		err = app.db.UpsertProductAndPrice(title, productSlug, category, imageURL, store.ID, price, currency, dp.URL)
 		if err != nil {
 			log.Printf("[crawl/%s] Error upserting %s: %v", storeSlug, title, err)
