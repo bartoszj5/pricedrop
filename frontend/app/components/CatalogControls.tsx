@@ -10,12 +10,13 @@ import {
 } from "lucide-react";
 import {
   startTransition,
-  useDeferredValue,
   useEffect,
+  useRef,
   useState,
 } from "react";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import type { ProductSort, StoreRead } from "../types";
+import { humanizeCategory } from "../lib/utils";
 
 interface CatalogControlsProps {
   stores: StoreRead[];
@@ -42,7 +43,7 @@ export default function CatalogControls({
 
   const [mobileOpen, setMobileOpen] = useState(false);
   const [searchValue, setSearchValue] = useState(searchParams.get("search") ?? "");
-  const deferredSearch = useDeferredValue(searchValue);
+  const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const activeCategory = searchParams.get("category") ?? "";
   const activeStore = searchParams.get("store") ?? "";
@@ -51,15 +52,34 @@ export default function CatalogControls({
     .filter(Boolean)
     .length;
 
+  // Sync URL → input (back/forward navigation, external URL changes)
   useEffect(() => {
     setSearchValue(searchParams.get("search") ?? "");
   }, [searchParams]);
 
+  // Debounce: sync input → URL after 400ms of no typing
   useEffect(() => {
     const currentSearch = searchParams.get("search") ?? "";
-    if (deferredSearch === currentSearch) return;
-    updateParams({ search: deferredSearch || null });
-  }, [deferredSearch, searchParams]);
+    if (searchValue === currentSearch) return;
+
+    debounceRef.current = setTimeout(() => {
+      const params = new URLSearchParams(searchParams.toString());
+      if (searchValue.trim()) {
+        params.set("search", searchValue);
+      } else {
+        params.delete("search");
+      }
+      params.delete("page");
+      const query = params.toString();
+      startTransition(() => {
+        router.push(query ? `${pathname}?${query}` : pathname);
+      });
+    }, 400);
+
+    return () => {
+      if (debounceRef.current) clearTimeout(debounceRef.current);
+    };
+  }, [searchValue, searchParams, pathname, router]);
 
   function updateParams(changes: Record<string, string | null>) {
     const params = new URLSearchParams(searchParams.toString());
@@ -117,7 +137,7 @@ export default function CatalogControls({
                       : "border-border bg-bg-card text-text-secondary hover:border-accent/40 hover:text-text-primary"
                   }`}
                 >
-                  {category}
+                  {humanizeCategory(category)}
                 </button>
               );
             })}

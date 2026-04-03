@@ -1,4 +1,5 @@
 export function formatPrice(price: number, currency = "PLN"): string {
+  if (price === 0) return "Za darmo";
   return price.toLocaleString("pl-PL", {
     style: "currency",
     currency,
@@ -33,4 +34,54 @@ export function getDomainLabel(url: string): string {
   } catch {
     return url;
   }
+}
+
+const categoryLabels: Record<string, string> = {
+  case: "Obudowa",
+  console: "Konsola",
+  "console-handheld": "Konsola przenośna",
+  "console-nintendo": "Nintendo",
+  "console-xbox": "Xbox",
+  cooling: "Chłodzenie",
+  "cooling-aio": "Chłodzenie AIO",
+  "cooling-air": "Chłodzenie powietrzem",
+  cpu: "Procesor",
+  desktop: "Komputer",
+  "ebook-reader": "Czytnik e-book",
+  game: "Gra",
+  "game-pc": "Gra PC",
+  "game-ps5": "Gra PS5",
+  "game-switch": "Gra Switch",
+  "game-xbox": "Gra Xbox",
+  gamepad: "Gamepad",
+  "gaming-chair": "Fotel gamingowy",
+  "gaming-headset": "Słuchawki gamingowe",
+  "gaming-keyboard": "Klawiatura gamingowa",
+  "gaming-monitor": "Monitor gamingowy",
+  "gaming-mouse": "Mysz gamingowa",
+  gpu: "Karta graficzna",
+  "gpu-amd": "GPU AMD",
+  "gpu-nvidia": "GPU NVIDIA",
+  hdd: "Dysk HDD",
+  headphones: "Słuchawki",
+  laptop: "Laptop",
+  monitor: "Monitor",
+  motherboard: "Płyta główna",
+  printer: "Drukarka",
+  projector: "Projektor",
+  psu: "Zasilacz",
+  ram: "Pamięć RAM",
+  router: "Router",
+  smartphone: "Smartfon",
+  smartwatch: "Smartwatch",
+  soundbar: "Soundbar",
+  ssd: "Dysk SSD",
+  "steering-wheel": "Kierownica",
+  tablet: "Tablet",
+  tv: "Telewizor",
+  vr: "Gogle VR",
+};
+
+export function humanizeCategory(slug: string): string {
+  return categoryLabels[slug] ?? slug.replace(/-/g, " ").replace(/\b\w/g, (c) => c.toUpperCase());
 }

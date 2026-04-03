@@ -1,7 +1,7 @@
 import Link from "next/link";
 import { ArrowUpRight, Radar, Store as StoreIcon, Tag } from "lucide-react";
 import type { ProductWithBestPrice } from "../types";
-import { formatPrice } from "../lib/utils";
+import { formatPrice, humanizeCategory } from "../lib/utils";
 
 interface ProductCardProps {
   product: ProductWithBestPrice;
@@ -33,7 +33,7 @@ export default function ProductCard({ product }: ProductCardProps) {
         <div className="absolute left-4 top-4 flex max-w-[calc(100%-2rem)] flex-wrap gap-2">
           <span className="paper-chip bg-bg-secondary/90">
             <Tag className="h-3.5 w-3.5" />
-            {product.category}
+            {humanizeCategory(product.category)}
           </span>
           <span
             className={`paper-chip ${

@@ -5,6 +5,7 @@ import ProductCard from "./components/ProductCard";
 import Pagination from "./components/Pagination";
 import EmptyState from "./components/EmptyState";
 import type { ProductSort, ProductWithBestPrice } from "./types";
+import { humanizeCategory } from "./lib/utils";
 
 interface PageProps {
   searchParams: Promise<{ [key: string]: string | string[] | undefined }>;
@@ -33,8 +34,10 @@ export default async function Home({ searchParams }: PageProps) {
   const items = productsData.items;
   const activeOffers = items.filter((product) => product.best_price != null);
   const trackedOnly = items.filter((product) => product.best_price == null);
+  const paidOffers = activeOffers.filter((p) => p.best_price != null && p.best_price > 0);
+  const featuredPool = paidOffers.length > 0 ? paidOffers : activeOffers;
   const featured: ProductWithBestPrice | null =
-    activeOffers.reduce<ProductWithBestPrice | null>((best, p) => {
+    featuredPool.reduce<ProductWithBestPrice | null>((best, p) => {
       if (p.best_price == null) return best;
       if (!best || (best.best_price != null && p.best_price < best.best_price)) return p;
       return best;
@@ -46,7 +49,7 @@ export default async function Home({ searchParams }: PageProps) {
   const title = search
     ? `Wyniki dla "${search}"`
     : category
-      ? `Kategoria: ${category}`
+      ? `Kategoria: ${humanizeCategory(category)}`
       : "Katalog okazji i monitoringu";
   const subtitleParts = [
     `${productsData.total} produktów`,
@@ -121,7 +124,7 @@ export default async function Home({ searchParams }: PageProps) {
         <>
           <section className="flex flex-col gap-4">
             <div className="flex flex-col gap-1">
-              <span className="eyebrow">Sekcja pierwsza</span>
+              <span className="eyebrow">Aktywne oferty</span>
               <h2 className="text-3xl text-text-primary">Najlepsze oferty teraz</h2>
               <p className="text-sm leading-6 text-text-secondary">
                 Produkty z potwierdzoną ceną i aktywną ofertą sprzedaży.
@@ -143,7 +146,7 @@ export default async function Home({ searchParams }: PageProps) {
 
           <section className="flex flex-col gap-4">
             <div className="flex flex-col gap-1">
-              <span className="eyebrow">Sekcja druga</span>
+              <span className="eyebrow">Monitoring</span>
               <h2 className="text-3xl text-text-primary">Produkty w monitoringu</h2>
               <p className="text-sm leading-6 text-text-secondary">
                 Rekordy bez aktywnej oferty, ale już przygotowane pod śledzenie

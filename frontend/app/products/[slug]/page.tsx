@@ -10,7 +10,7 @@ import {
   Tag,
 } from "lucide-react";
 import { getProductDetail, getProductHistory } from "../../lib/api";
-import { formatPrice, formatDate, timeAgo } from "../../lib/utils";
+import { formatPrice, formatDate, timeAgo, humanizeCategory } from "../../lib/utils";
 import PriceHistoryChartClient from "../../components/PriceHistoryChartClient";
 import EmptyState from "../../components/EmptyState";
 import type { Metadata } from "next";
@@ -90,7 +90,7 @@ export default async function ProductDetailPage({ params }: PageProps) {
             <div className="flex flex-wrap gap-2">
               <span className="paper-chip">
                 <Tag className="h-3.5 w-3.5" />
-                {product.category}
+                {humanizeCategory(product.category)}
               </span>
               {product.release_date && (
                 <span className="paper-chip">
@@ -161,7 +161,7 @@ export default async function ProductDetailPage({ params }: PageProps) {
 
         <section className="flex flex-col gap-4">
           <div className="flex flex-col gap-1">
-            <span className="eyebrow">Sekcja główna</span>
+            <span className="eyebrow">Porównanie cen</span>
             <h2 className="text-3xl text-text-primary">Dostępne oferty</h2>
           </div>
           {availablePrices.length > 0 ? (
@@ -237,7 +237,7 @@ export default async function ProductDetailPage({ params }: PageProps) {
 
         <section className="flex flex-col gap-4">
           <div className="flex flex-col gap-1">
-            <span className="eyebrow">Sekcja druga</span>
+            <span className="eyebrow">Historia cen</span>
             <h2 className="text-3xl text-text-primary">Ruch cenowy</h2>
           </div>
           {history.length > 0 ? (

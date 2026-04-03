@@ -19,6 +19,9 @@ const bodyFont = Manrope({
 export const metadata: Metadata = {
   title: "PriceDrop",
   description: "Katalog okazji i monitoring cen dla elektroniki, gier i akcesoriów.",
+  icons: {
+    icon: "/favicon.svg",
+  },
 };
 
 export default function RootLayout({
@@ -29,11 +32,17 @@ export default function RootLayout({
   return (
     <html lang="pl">
       <body className={`${displayFont.variable} ${bodyFont.variable} antialiased`}>
-        <div className="min-h-screen">
+        <div className="flex min-h-screen flex-col">
           <Suspense>
             <Navbar />
           </Suspense>
-          {children}
+          <div className="flex-1">{children}</div>
+          <footer className="border-t border-border/80 bg-bg-secondary/60">
+            <div className="mx-auto flex w-[min(1380px,calc(100vw-32px))] flex-col items-center gap-3 py-8 text-center text-sm text-text-muted sm:flex-row sm:justify-between sm:text-left">
+              <p>&copy; {new Date().getFullYear()} PriceDrop. Monitoring cen dla elektroniki, gier i akcesoriów.</p>
+              <p>Dane odświeżane automatycznie. Ceny mogą się różnić od aktualnych ofert w sklepach.</p>
+            </div>
+          </footer>
         </div>
       </body>
     </html>

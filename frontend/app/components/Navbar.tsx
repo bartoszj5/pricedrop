@@ -31,7 +31,7 @@ export default function Navbar() {
             </div>
           </Link>
 
-          <div className="paper-chip hidden lg:inline-flex">
+          <div className="paper-chip hidden xl:inline-flex">
             Monitoring cen dla katalogu i gier
           </div>
         </div>
@@ -58,7 +58,7 @@ export default function Navbar() {
         })}
         </nav>
 
-        <div className="hidden items-center gap-2 text-sm text-text-secondary lg:flex">
+        <div className="hidden items-center gap-2 text-sm text-text-secondary xl:flex">
           <span className="paper-chip">
             Ceny aktywne i produkty w monitoringu
           </span>
