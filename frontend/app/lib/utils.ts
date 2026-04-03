@@ -1,5 +1,4 @@
 export function formatPrice(price: number, currency = "PLN"): string {
-  if (price === 0) return "Za darmo";
   return price.toLocaleString("pl-PL", {
     style: "currency",
     currency,

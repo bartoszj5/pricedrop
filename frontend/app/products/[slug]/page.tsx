@@ -46,7 +46,7 @@ export default async function ProductDetailPage({ params }: PageProps) {
 
   const { product, prices } = detail;
   const availablePrices = prices.filter(
-    (p) => p.current_price != null && p.is_available,
+    (p) => p.current_price != null && p.current_price > 0 && p.is_available,
   );
   const cheapest = availablePrices.sort(
     (a, b) => (a.current_price ?? 0) - (b.current_price ?? 0),

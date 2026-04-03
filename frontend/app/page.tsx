@@ -32,10 +32,9 @@ export default async function Home({ searchParams }: PageProps) {
   ]);
 
   const items = productsData.items;
-  const activeOffers = items.filter((product) => product.best_price != null);
-  const trackedOnly = items.filter((product) => product.best_price == null);
-  const paidOffers = activeOffers.filter((p) => p.best_price != null && p.best_price > 0);
-  const featuredPool = paidOffers.length > 0 ? paidOffers : activeOffers;
+  const activeOffers = items.filter((product) => product.best_price != null && product.best_price > 0);
+  const trackedOnly = items.filter((product) => product.best_price == null || product.best_price === 0);
+  const featuredPool = activeOffers;
   const featured: ProductWithBestPrice | null =
     featuredPool.reduce<ProductWithBestPrice | null>((best, p) => {
       if (p.best_price == null) return best;

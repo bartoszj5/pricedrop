@@ -8,9 +8,8 @@ interface ProductCardProps {
 }
 
 export default function ProductCard({ product }: ProductCardProps) {
-  const hasActiveOffer = product.best_price != null;
+  const hasActiveOffer = product.best_price != null && product.best_price > 0;
   const availableOffersCount = product.available_offers_count ?? 0;
-  const trackedStoresCount = product.tracked_stores_count ?? 0;
 
   return (
     <Link
@@ -72,21 +71,13 @@ export default function ProductCard({ product }: ProductCardProps) {
           )}
         </div>
 
-        <div className="grid grid-cols-2 gap-3 text-sm">
+        <div className="text-sm">
           <div className="rounded-[22px] border border-border bg-bg-secondary px-4 py-3">
             <p className="text-xs font-semibold uppercase tracking-[0.16em] text-text-muted">
               Aktywne oferty
             </p>
             <p className="mt-2 text-xl font-semibold text-text-primary">
               {availableOffersCount}
-            </p>
-          </div>
-          <div className="rounded-[22px] border border-border bg-bg-secondary px-4 py-3">
-            <p className="text-xs font-semibold uppercase tracking-[0.16em] text-text-muted">
-              Monitoring
-            </p>
-            <p className="mt-2 text-xl font-semibold text-text-primary">
-              {trackedStoresCount} sklepów
             </p>
           </div>
         </div>

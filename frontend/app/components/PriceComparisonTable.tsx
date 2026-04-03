@@ -8,7 +8,7 @@ interface PriceComparisonTableProps {
 
 export default function PriceComparisonTable({ prices }: PriceComparisonTableProps) {
   const available = prices
-    .filter((p) => p.current_price != null)
+    .filter((p) => p.current_price != null && p.current_price > 0)
     .sort((a, b) => (a.current_price ?? 0) - (b.current_price ?? 0));
 
   const unavailable = prices.filter((p) => p.current_price == null);
