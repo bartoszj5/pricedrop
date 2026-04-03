@@ -123,6 +123,29 @@ export interface ITADGameRead {
   image_url: string | null;
 }
 
+export interface ITADDealRead {
+  shop_name: string;
+  shop_id: number;
+  price_amount: number;
+  regular_amount: number | null;
+  cut: number;
+  currency: string;
+  url: string;
+}
+
+export interface ITADGameWithDeals {
+  id: string;
+  slug: string;
+  title: string;
+  type: string | null;
+  mature: boolean;
+  image_url: string | null;
+  deals: ITADDealRead[];
+  best_price: number | null;
+  best_price_currency: string | null;
+  best_shop: string | null;
+}
+
 export type ProductSort =
   | "featured"
   | "price_asc"

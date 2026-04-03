@@ -6,6 +6,7 @@ import type {
   StoreRead,
   PriceListResponse,
   ITADGameRead,
+  ITADGameWithDeals,
   ProductSort,
 } from "../types";
 
@@ -120,6 +121,34 @@ export async function searchITAD(
       // Ignore JSON parsing failures and keep fallback detail.
     }
 
+    const error = new Error(detail) as Error & { status?: number };
+    error.status = res.status;
+    throw error;
+  }
+  return res.json();
+}
+
+export async function searchITADDeals(
+  title: string,
+  results = 12,
+  country = "PL",
+): Promise<ITADGameWithDeals[]> {
+  const sp = new URLSearchParams({
+    title,
+    results: String(results),
+    country,
+  });
+  const res = await fetch(`/api/itad/search-deals?${sp}`);
+  if (!res.ok) {
+    let detail = `ITAD search error: ${res.status}`;
+    try {
+      const payload = await res.json();
+      if (payload && typeof payload.detail === "string") {
+        detail = payload.detail;
+      }
+    } catch {
+      // Ignore JSON parsing failures and keep fallback detail.
+    }
     const error = new Error(detail) as Error & { status?: number };
     error.status = res.status;
     throw error;

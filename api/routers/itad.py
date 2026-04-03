@@ -31,6 +31,29 @@ class ITADGameRead(SQLModel):
     image_url: str | None = None
 
 
+class ITADDealRead(SQLModel):
+    shop_name: str
+    shop_id: int
+    price_amount: float
+    regular_amount: float | None = None
+    cut: int
+    currency: str
+    url: str
+
+
+class ITADGameWithDeals(SQLModel):
+    id: str
+    slug: str
+    title: str
+    type: str | None
+    mature: bool
+    image_url: str | None = None
+    deals: list[ITADDealRead] = []
+    best_price: float | None = None
+    best_price_currency: str | None = None
+    best_shop: str | None = None
+
+
 class ITADSyncResponse(SQLModel):
     source: str
     country: str
@@ -217,6 +240,144 @@ def _select_deal_price(deal: dict[str, Any]) -> Decimal | None:
     if not isinstance(price_obj, dict):
         return None
     return _decimal_money(price_obj.get("amount"))
+
+
+@router.get("/itad/search-deals", response_model=list[ITADGameWithDeals])
+def search_itad_deals(
+    title: Annotated[str, Query(min_length=1, max_length=120)],
+    results: Annotated[int, Query(ge=1, le=50)] = 12,
+    country: Annotated[str, Query(min_length=2, max_length=2)] = "PL",
+) -> list[ITADGameWithDeals]:
+    """Search ITAD for games and return results with current store prices."""
+    api_key = _get_api_key()
+
+    with httpx.Client(
+        base_url=_get_base_url(),
+        timeout=_get_timeout_seconds(),
+        params={"key": api_key},
+    ) as client:
+        search_payload = _itad_request(
+            client,
+            "GET",
+            "/games/search/v1",
+            params={"title": title, "results": results},
+        )
+
+        if not isinstance(search_payload, list):
+            raise HTTPException(
+                status_code=status.HTTP_502_BAD_GATEWAY,
+                detail="Unexpected ITAD search response format.",
+            )
+
+        games: list[dict[str, Any]] = []
+        for item in search_payload:
+            if not isinstance(item, dict):
+                continue
+            if not isinstance(item.get("id"), str) or not isinstance(item.get("slug"), str):
+                continue
+            if not isinstance(item.get("title"), str):
+                continue
+            games.append(item)
+
+        if not games:
+            return []
+
+        game_ids = [g["id"] for g in games]
+
+        prices_payload = _itad_request(
+            client,
+            "POST",
+            "/games/prices/v3",
+            params={"country": country.upper(), "deals": False, "vouchers": True},
+            json_body=game_ids,
+        )
+
+    prices_by_id: dict[str, list[dict[str, Any]]] = {}
+    if isinstance(prices_payload, list):
+        for row in prices_payload:
+            if not isinstance(row, dict):
+                continue
+            gid = row.get("id")
+            if isinstance(gid, str):
+                raw_deals = row.get("deals")
+                if isinstance(raw_deals, list):
+                    prices_by_id[gid] = raw_deals
+
+    result: list[ITADGameWithDeals] = []
+    for game in games:
+        game_id = str(game["id"])
+        raw_deals = prices_by_id.get(game_id, [])
+
+        deals: list[ITADDealRead] = []
+        for deal in raw_deals:
+            if not isinstance(deal, dict):
+                continue
+            shop_obj = deal.get("shop")
+            if not isinstance(shop_obj, dict):
+                continue
+            price_obj = deal.get("price")
+            if not isinstance(price_obj, dict):
+                continue
+
+            amount = _decimal_money(price_obj.get("amount"))
+            if amount is None:
+                continue
+
+            shop_name = str(shop_obj.get("name") or "").strip()
+            if not shop_name:
+                continue
+
+            raw_shop_id = shop_obj.get("id")
+            try:
+                shop_id_int = int(raw_shop_id)
+            except (TypeError, ValueError):
+                shop_id_int = 0
+
+            regular_obj = deal.get("regular")
+            regular_amount = None
+            if isinstance(regular_obj, dict):
+                regular_amount = _decimal_money(regular_obj.get("amount"))
+
+            cut = deal.get("cut", 0)
+            if not isinstance(cut, (int, float)):
+                cut = 0
+
+            deal_url = str(deal.get("url") or "").strip()
+            currency = _normalize_currency(price_obj.get("currency"))
+
+            deals.append(ITADDealRead(
+                shop_name=shop_name,
+                shop_id=shop_id_int,
+                price_amount=float(amount),
+                regular_amount=float(regular_amount) if regular_amount is not None else None,
+                cut=int(cut),
+                currency=currency,
+                url=deal_url,
+            ))
+
+        deals.sort(key=lambda d: (d.price_amount == 0, d.price_amount))
+
+        paid = [d for d in deals if d.price_amount > 0]
+        best_price = paid[0].price_amount if paid else (deals[0].price_amount if deals else None)
+        best_currency = paid[0].currency if paid else (deals[0].currency if deals else None)
+        best_shop = paid[0].shop_name if paid else (deals[0].shop_name if deals else None)
+
+        result.append(ITADGameWithDeals(
+            id=game_id,
+            slug=str(game["slug"]),
+            title=str(game["title"]),
+            type=game.get("type") if isinstance(game.get("type"), str) else None,
+            mature=bool(game.get("mature", False)),
+            image_url=_image_from_assets(game),
+            deals=deals,
+            best_price=best_price,
+            best_price_currency=best_currency,
+            best_shop=best_shop,
+        ))
+
+    result.sort(key=lambda g: 0 if any(d.price_amount > 0 for d in g.deals) else 1)
+
+    return result
 
 
 @router.get("/itad/search", response_model=list[ITADGameRead])

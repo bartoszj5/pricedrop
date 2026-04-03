@@ -7,7 +7,7 @@ import { usePathname } from "next/navigation";
 const navLinks = [
   { label: "Okazje", href: "/" },
   { label: "Sklepy", href: "/stores" },
-  { label: "Gry / ITAD", href: "/search" },
+  { label: "Gry", href: "/search" },
 ];
 
 export default function Navbar() {
@@ -66,7 +66,7 @@ export default function Navbar() {
             href="/search"
             className="inline-flex items-center gap-2 rounded-full border border-border bg-bg-card px-4 py-2 font-semibold text-text-primary hover:-translate-y-0.5 hover:border-accent/40"
           >
-            Moduł gamingowy
+            Porównywarka gier
             <ArrowUpRight className="h-4 w-4" />
           </Link>
         </div>
