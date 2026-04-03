@@ -153,13 +153,14 @@ def _apply_product_filters(
     store: str | None = None,
 ):
     if search and search.strip():
-        pattern = f"%{search.strip()}%"
-        condition = or_(
-            Product.title.ilike(pattern),
-            Product.slug.ilike(pattern),
-            Product.category.ilike(pattern),
-        )
-        statement = statement.where(condition)
+        for term in search.strip().split():
+            pattern = f"%{term}%"
+            condition = or_(
+                Product.title.ilike(pattern),
+                Product.slug.ilike(pattern),
+                Product.category.ilike(pattern),
+            )
+            statement = statement.where(condition)
 
     if category and category.strip():
         statement = statement.where(Product.category == category.strip())
@@ -192,14 +193,15 @@ def list_products(
     count_query = select(func.count()).select_from(Product)
 
     if search and search.strip():
-        pattern = f"%{search.strip()}%"
-        condition = or_(
-            Product.title.ilike(pattern),
-            Product.slug.ilike(pattern),
-            Product.category.ilike(pattern),
-        )
-        query = query.where(condition)
-        count_query = count_query.where(condition)
+        for term in search.strip().split():
+            pattern = f"%{term}%"
+            condition = or_(
+                Product.title.ilike(pattern),
+                Product.slug.ilike(pattern),
+                Product.category.ilike(pattern),
+            )
+            query = query.where(condition)
+            count_query = count_query.where(condition)
 
     total = session.exec(count_query).one()
     products = session.exec(
