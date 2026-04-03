@@ -27,10 +27,22 @@ CATEGORY_PREFIXES = {
 _DIACRITICS = str.maketrans("ąćęłńóśźż", "acelnoszz")
 _NON_ALNUM = re.compile(r"[^a-z0-9]+")
 
+# Morele-style spec suffixes: ", 3.5 GHz, 32 MB, BOX (100-100000927BOX)"
+# Truncate at the first comma followed by a number (spec data, not product name).
+_SPEC_SUFFIX = re.compile(r",\s*\d.*$")
+# Trailing parenthesised part numbers, e.g. "(100-100000927BOX)" or "(YD3200C5FHBOX)"
+_PART_NUMBER = re.compile(r"\s*\([A-Z0-9][-A-Z0-9]*\)\s*$", re.IGNORECASE)
+
 
 def fingerprint(title: str) -> str:
-    """Compute a canonical fingerprint by stripping category prefixes and slugifying."""
+    """Compute a canonical fingerprint by stripping category prefixes, specs, and slugifying."""
     s = title.lower().strip().translate(_DIACRITICS)
+
+    # Strip spec suffixes (e.g. ", 3.5 ghz, 32 mb, box ...").
+    s = _SPEC_SUFFIX.sub("", s)
+    # Strip trailing part numbers in parentheses.
+    s = _PART_NUMBER.sub("", s)
+
     tokens = s.split()
 
     # Strip leading category words.

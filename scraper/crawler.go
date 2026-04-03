@@ -94,6 +94,19 @@ var diacriticReplacer = strings.NewReplacer(
 	"ó", "o", "ś", "s", "ź", "z", "ż", "z",
 )
 
+// specSuffixRegex matches Morele-style spec tails: ", 3.5 GHz, 32 MB, BOX (100-100000927BOX)"
+var specSuffixRegex = regexp.MustCompile(`,\s*\d.*$`)
+
+// partNumberRegex matches trailing parenthesised part numbers, e.g. "(YD3200C5FHBOX)"
+var partNumberRegex = regexp.MustCompile(`\s*\([A-Za-z0-9][-A-Za-z0-9]*\)\s*$`)
+
+// cleanProductTitle strips spec suffixes and part numbers from verbose store titles.
+func cleanProductTitle(title string) string {
+	title = specSuffixRegex.ReplaceAllString(title, "")
+	title = partNumberRegex.ReplaceAllString(title, "")
+	return strings.TrimSpace(title)
+}
+
 // normalizeTitle strips leading category prefix words from a product title
 // so that e.g. "Monitor LG UltraGear 34G600A-B" and "LG UltraGear 34G600A-B"
 // produce the same slug.
