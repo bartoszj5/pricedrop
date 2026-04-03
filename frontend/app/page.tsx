@@ -1,5 +1,6 @@
 import { getProducts, getStores } from "./lib/api";
 import CatalogControls from "./components/CatalogControls";
+import Sidebar from "./components/Sidebar";
 import FeaturedBanner from "./components/FeaturedBanner";
 import ProductCard from "./components/ProductCard";
 import Pagination from "./components/Pagination";
@@ -105,70 +106,79 @@ export default async function Home({ searchParams }: PageProps) {
         categories={productsData.categories ?? []}
       />
 
-      {page === 1 && (
-        <FeaturedBanner
-          product={featured}
-          trackedStoresCount={storesData.total}
+      <div className="flex gap-6">
+        <Sidebar
+          stores={storesData.items}
+          categories={productsData.categories ?? []}
         />
-      )}
 
-      {items.length === 0 ? (
-        <EmptyState
-          message="Brak produktów dla tego zestawu filtrów"
-          detail="Spróbuj zmienić kategorię, sklep albo frazę wyszukiwania. Katalog rozdziela aktywne oferty od monitoringu, więc przy ostrych filtrach wynik może być pusty."
-          actionHref="/"
-          actionLabel="Wróć do pełnego katalogu"
-        />
-      ) : (
-        <>
-          <section className="flex flex-col gap-4">
-            <div className="flex flex-col gap-1">
-              <span className="eyebrow">Aktywne oferty</span>
-              <h2 className="text-3xl text-text-primary">Najlepsze oferty teraz</h2>
-              <p className="text-sm leading-6 text-text-secondary">
-                Produkty z potwierdzoną ceną i aktywną ofertą sprzedaży.
-              </p>
-            </div>
-            {activeOffers.length > 0 ? (
-              <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
-                {activeOffers.map((product) => (
-                  <ProductCard key={product.id} product={product} />
-                ))}
-              </div>
-            ) : (
-              <EmptyState
-                message="Na tej stronie nie ma jeszcze aktywnych ofert"
-                detail="Filtry zawęziły katalog do produktów, które są obecnie tylko monitorowane. To uczciwy stan danych, nie brak renderu."
-              />
-            )}
-          </section>
+        <div className="flex min-w-0 flex-1 flex-col gap-6">
+          {page === 1 && (
+            <FeaturedBanner
+              product={featured}
+              trackedStoresCount={storesData.total}
+            />
+          )}
 
-          <section className="flex flex-col gap-4">
-            <div className="flex flex-col gap-1">
-              <span className="eyebrow">Monitoring</span>
-              <h2 className="text-3xl text-text-primary">Produkty w monitoringu</h2>
-              <p className="text-sm leading-6 text-text-secondary">
-                Rekordy bez aktywnej oferty, ale już przygotowane pod śledzenie
-                cen w wielu sklepach.
-              </p>
-            </div>
-            {trackedOnly.length > 0 ? (
-              <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
-                {trackedOnly.map((product) => (
-                  <ProductCard key={product.id} product={product} />
-                ))}
-              </div>
-            ) : (
-              <EmptyState
-                message="Wszystkie produkty z tej strony mają aktywną ofertę"
-                detail="W tym zestawie wyników monitoring bez ceny nie był potrzebny, bo cały widoczny wycinek katalogu ma już aktywne oferty."
-              />
-            )}
-          </section>
-        </>
-      )}
+          {items.length === 0 ? (
+            <EmptyState
+              message="Brak produktów dla tego zestawu filtrów"
+              detail="Spróbuj zmienić kategorię, sklep albo frazę wyszukiwania. Katalog rozdziela aktywne oferty od monitoringu, więc przy ostrych filtrach wynik może być pusty."
+              actionHref="/"
+              actionLabel="Wróć do pełnego katalogu"
+            />
+          ) : (
+            <>
+              <section className="flex flex-col gap-4">
+                <div className="flex flex-col gap-1">
+                  <span className="eyebrow">Aktywne oferty</span>
+                  <h2 className="text-3xl text-text-primary">Najlepsze oferty teraz</h2>
+                  <p className="text-sm leading-6 text-text-secondary">
+                    Produkty z potwierdzoną ceną i aktywną ofertą sprzedaży.
+                  </p>
+                </div>
+                {activeOffers.length > 0 ? (
+                  <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-2 xl:grid-cols-3">
+                    {activeOffers.map((product) => (
+                      <ProductCard key={product.id} product={product} />
+                    ))}
+                  </div>
+                ) : (
+                  <EmptyState
+                    message="Na tej stronie nie ma jeszcze aktywnych ofert"
+                    detail="Filtry zawęziły katalog do produktów, które są obecnie tylko monitorowane. To uczciwy stan danych, nie brak renderu."
+                  />
+                )}
+              </section>
 
-      <Pagination page={page} totalPages={productsData.total_pages} />
+              <section className="flex flex-col gap-4">
+                <div className="flex flex-col gap-1">
+                  <span className="eyebrow">Monitoring</span>
+                  <h2 className="text-3xl text-text-primary">Produkty w monitoringu</h2>
+                  <p className="text-sm leading-6 text-text-secondary">
+                    Rekordy bez aktywnej oferty, ale już przygotowane pod śledzenie
+                    cen w wielu sklepach.
+                  </p>
+                </div>
+                {trackedOnly.length > 0 ? (
+                  <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-2 xl:grid-cols-3">
+                    {trackedOnly.map((product) => (
+                      <ProductCard key={product.id} product={product} />
+                    ))}
+                  </div>
+                ) : (
+                  <EmptyState
+                    message="Wszystkie produkty z tej strony mają aktywną ofertę"
+                    detail="W tym zestawie wyników monitoring bez ceny nie był potrzebny, bo cały widoczny wycinek katalogu ma już aktywne oferty."
+                  />
+                )}
+              </section>
+            </>
+          )}
+
+          <Pagination page={page} totalPages={productsData.total_pages} />
+        </div>
+      </div>
     </main>
   );
 }
