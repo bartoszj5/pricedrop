@@ -69,6 +69,20 @@ class ITADSyncResponse(SQLModel):
     preview: list[ITADGameRead]
 
 
+class ITADSearchSaveResponse(SQLModel):
+    source: str
+    country: str
+    query: str
+    games_found: int
+    products_synced: int
+    products_created: int
+    products_updated: int
+    stores_created: int
+    prices_created: int
+    prices_updated: int
+    history_created: int
+
+
 def _get_api_key() -> str:
     api_key = os.getenv("ITAD_API_KEY", "").strip()
     if not api_key:
@@ -215,6 +229,213 @@ def _hydrate_games_with_assets(
         hydrated.append(_merge_game_with_info(game, info_payload))
 
     return hydrated
+
+
+def _save_games_to_db(
+    session: Session,
+    games: list[dict[str, Any]],
+    prices_payload: list[Any],
+) -> tuple[dict[str, int], dict[str, "Product"]]:
+    """Save ITAD games with their deals to the database.
+
+    Returns (counts_dict, products_by_game_id).
+    """
+    now = datetime.now(timezone.utc)
+
+    counts = {
+        "products_created": 0,
+        "products_updated": 0,
+        "stores_created": 0,
+        "prices_created": 0,
+        "prices_updated": 0,
+        "history_created": 0,
+    }
+
+    all_stores = session.exec(select(Store)).all()
+    stores_by_name = {store.name.casefold(): store for store in all_stores}
+    used_slugs = {store.slug for store in all_stores}
+
+    products_by_game_id: dict[str, Product] = {}
+
+    for game in games:
+        game_id = str(game["id"])
+        slug = str(game["slug"])
+        title = str(game["title"])
+        category = str(game.get("type") or "game")
+        image_url = _image_from_assets(game)
+
+        product = session.exec(select(Product).where(Product.slug == slug)).first()
+        if product is None:
+            product = Product(
+                title=title,
+                slug=slug,
+                category=category,
+                image_url=image_url,
+            )
+            session.add(product)
+            session.flush()
+            counts["products_created"] += 1
+        else:
+            changed = False
+            if product.title != title:
+                product.title = title
+                changed = True
+            if product.category != category:
+                product.category = category
+                changed = True
+            if image_url and product.image_url != image_url:
+                product.image_url = image_url
+                changed = True
+            if changed:
+                product.updated_at = now
+                session.add(product)
+                counts["products_updated"] += 1
+
+        products_by_game_id[game_id] = product
+
+    product_ids = [
+        product.id
+        for product in products_by_game_id.values()
+        if product.id is not None
+    ]
+    existing_prices: list[Price] = []
+    if product_ids:
+        existing_prices = list(
+            session.exec(select(Price).where(Price.product_id.in_(product_ids))).all()
+        )
+
+    prices_by_pair: dict[tuple[int, int], Price] = {
+        (price.product_id, price.store_id): price for price in existing_prices
+    }
+
+    for game_price_row in prices_payload:
+        if not isinstance(game_price_row, dict):
+            continue
+
+        game_id = game_price_row.get("id")
+        if not isinstance(game_id, str):
+            continue
+
+        product = products_by_game_id.get(game_id)
+        if product is None or product.id is None:
+            continue
+
+        deals = game_price_row.get("deals")
+        if not isinstance(deals, list):
+            continue
+
+        best_deal_by_shop: dict[int, tuple[dict[str, Any], Decimal]] = {}
+
+        for deal in deals:
+            if not isinstance(deal, dict):
+                continue
+
+            shop_obj = deal.get("shop")
+            if not isinstance(shop_obj, dict):
+                continue
+
+            raw_shop_id = shop_obj.get("id")
+            try:
+                shop_id = int(raw_shop_id)
+            except (TypeError, ValueError):
+                continue
+
+            amount = _select_deal_price(deal)
+            if amount is None:
+                continue
+
+            existing = best_deal_by_shop.get(shop_id)
+            if existing is None or amount < existing[1]:
+                best_deal_by_shop[shop_id] = (deal, amount)
+
+        for shop_id, selected in best_deal_by_shop.items():
+            deal, amount = selected
+            shop_obj = deal.get("shop")
+            if not isinstance(shop_obj, dict):
+                continue
+
+            shop_name = str(shop_obj.get("name") or "").strip()
+            if not shop_name:
+                continue
+
+            store_key = shop_name.casefold()
+            store = stores_by_name.get(store_key)
+            if store is None:
+                slug_base = _slugify(shop_name) or f"shop-{shop_id}"
+                slug_candidate = slug_base
+                suffix = 1
+                while slug_candidate in used_slugs:
+                    suffix += 1
+                    slug_candidate = f"{slug_base}-{suffix}"
+
+                store = Store(
+                    name=shop_name,
+                    slug=slug_candidate,
+                    url=ITAD_FALLBACK_STORE_URL,
+                    is_active=True,
+                )
+                session.add(store)
+                session.flush()
+
+                stores_by_name[store_key] = store
+                used_slugs.add(slug_candidate)
+                counts["stores_created"] += 1
+
+            if store.id is None:
+                continue
+
+            price_obj = deal.get("price")
+            if not isinstance(price_obj, dict):
+                continue
+
+            currency = _normalize_currency(price_obj.get("currency"))
+            deal_url = str(deal.get("url") or "").strip()
+            if not deal_url.startswith(("http://", "https://")):
+                deal_url = ITAD_FALLBACK_STORE_URL
+
+            pair = (product.id, store.id)
+            price_row = prices_by_pair.get(pair)
+
+            if price_row is None:
+                created = Price(
+                    product_id=product.id,
+                    store_id=store.id,
+                    current_price=amount,
+                    currency=currency,
+                    url=deal_url,
+                    is_available=True,
+                    last_checked_at=now,
+                )
+                session.add(created)
+                session.flush()
+
+                prices_by_pair[pair] = created
+                counts["prices_created"] += 1
+                continue
+
+            old_price = price_row.current_price
+            price_row.current_price = amount
+            price_row.currency = currency
+            price_row.url = deal_url
+            price_row.is_available = True
+            price_row.last_checked_at = now
+            price_row.updated_at = now
+            session.add(price_row)
+            counts["prices_updated"] += 1
+
+            if old_price != amount:
+                session.add(
+                    PriceHistory(
+                        price_id=price_row.id,
+                        old_price=old_price,
+                        new_price=amount,
+                        currency=currency,
+                        recorded_at=now,
+                    )
+                )
+                counts["history_created"] += 1
+
+    return counts, products_by_game_id
 
 
 def _decimal_money(value: Any) -> Decimal | None:
@@ -507,196 +728,9 @@ def sync_itad_games(
             detail="Unexpected ITAD prices response format.",
         )
 
-    now = datetime.now(timezone.utc)
-
-    products_created = 0
-    products_updated = 0
-    stores_created = 0
-    prices_created = 0
-    prices_updated = 0
-    history_created = 0
-
-    all_stores = session.exec(select(Store)).all()
-    stores_by_name = {store.name.casefold(): store for store in all_stores}
-    used_slugs = {store.slug for store in all_stores}
-
-    products_by_game_id: dict[str, Product] = {}
-
-    for game in selected_games:
-        game_id = str(game["id"])
-        slug = str(game["slug"])
-        title = str(game["title"])
-        category = str(game.get("type") or "game")
-        image_url = _image_from_assets(game)
-
-        product = session.exec(select(Product).where(Product.slug == slug)).first()
-        if product is None:
-            product = Product(
-                title=title,
-                slug=slug,
-                category=category,
-                image_url=image_url,
-            )
-            session.add(product)
-            session.flush()
-            products_created += 1
-        else:
-            changed = False
-            if product.title != title:
-                product.title = title
-                changed = True
-            if product.category != category:
-                product.category = category
-                changed = True
-            if image_url and product.image_url != image_url:
-                product.image_url = image_url
-                changed = True
-            if changed:
-                product.updated_at = now
-                session.add(product)
-                products_updated += 1
-
-        products_by_game_id[game_id] = product
-
-    product_ids = [product.id for product in products_by_game_id.values() if product.id is not None]
-    existing_prices = []
-    if product_ids:
-        existing_prices = session.exec(
-            select(Price).where(Price.product_id.in_(product_ids))
-        ).all()
-
-    prices_by_pair: dict[tuple[int, int], Price] = {
-        (price.product_id, price.store_id): price
-        for price in existing_prices
-    }
-
-    for game_price_row in prices_payload:
-        if not isinstance(game_price_row, dict):
-            continue
-
-        game_id = game_price_row.get("id")
-        if not isinstance(game_id, str):
-            continue
-
-        product = products_by_game_id.get(game_id)
-        if product is None or product.id is None:
-            continue
-
-        deals = game_price_row.get("deals")
-        if not isinstance(deals, list):
-            continue
-
-        best_deal_by_shop: dict[int, tuple[dict[str, Any], Decimal]] = {}
-
-        for deal in deals:
-            if not isinstance(deal, dict):
-                continue
-
-            shop_obj = deal.get("shop")
-            if not isinstance(shop_obj, dict):
-                continue
-
-            raw_shop_id = shop_obj.get("id")
-            try:
-                shop_id = int(raw_shop_id)
-            except (TypeError, ValueError):
-                continue
-
-            amount = _select_deal_price(deal)
-            if amount is None:
-                continue
-
-            existing = best_deal_by_shop.get(shop_id)
-            if existing is None or amount < existing[1]:
-                best_deal_by_shop[shop_id] = (deal, amount)
-
-        for shop_id, selected in best_deal_by_shop.items():
-            deal, amount = selected
-            shop_obj = deal.get("shop")
-            if not isinstance(shop_obj, dict):
-                continue
-
-            shop_name = str(shop_obj.get("name") or "").strip()
-            if not shop_name:
-                continue
-
-            store_key = shop_name.casefold()
-            store = stores_by_name.get(store_key)
-            if store is None:
-                slug_base = _slugify(shop_name) or f"shop-{shop_id}"
-                slug_candidate = slug_base
-                suffix = 1
-                while slug_candidate in used_slugs:
-                    suffix += 1
-                    slug_candidate = f"{slug_base}-{suffix}"
-
-                store = Store(
-                    name=shop_name,
-                    slug=slug_candidate,
-                    url=ITAD_FALLBACK_STORE_URL,
-                    is_active=True,
-                )
-                session.add(store)
-                session.flush()
-
-                stores_by_name[store_key] = store
-                used_slugs.add(slug_candidate)
-                stores_created += 1
-
-            if store.id is None:
-                continue
-
-            price_obj = deal.get("price")
-            if not isinstance(price_obj, dict):
-                continue
-
-            currency = _normalize_currency(price_obj.get("currency"))
-            deal_url = str(deal.get("url") or "").strip()
-            if not deal_url.startswith(("http://", "https://")):
-                deal_url = ITAD_FALLBACK_STORE_URL
-
-            pair = (product.id, store.id)
-            price_row = prices_by_pair.get(pair)
-
-            if price_row is None:
-                created = Price(
-                    product_id=product.id,
-                    store_id=store.id,
-                    current_price=amount,
-                    currency=currency,
-                    url=deal_url,
-                    is_available=True,
-                    last_checked_at=now,
-                )
-                session.add(created)
-                session.flush()
-
-                prices_by_pair[pair] = created
-                prices_created += 1
-                continue
-
-            old_price = price_row.current_price
-            price_row.current_price = amount
-            price_row.currency = currency
-            price_row.url = deal_url
-            price_row.is_available = True
-            price_row.last_checked_at = now
-            price_row.updated_at = now
-            session.add(price_row)
-            prices_updated += 1
-
-            if old_price != amount:
-                session.add(
-                    PriceHistory(
-                        price_id=price_row.id,
-                        old_price=old_price,
-                        new_price=amount,
-                        currency=currency,
-                        recorded_at=now,
-                    )
-                )
-                history_created += 1
-
+    counts, products_by_game_id = _save_games_to_db(
+        session, selected_games, prices_payload
+    )
     session.commit()
 
     preview = [
@@ -717,11 +751,91 @@ def sync_itad_games(
         ranked_games_fetched=len(ranked_payload),
         games_selected=len(selected_games),
         products_synced=len(products_by_game_id),
-        products_created=products_created,
-        products_updated=products_updated,
-        stores_created=stores_created,
-        prices_created=prices_created,
-        prices_updated=prices_updated,
-        history_created=history_created,
         preview=preview,
+        **counts,
+    )
+
+
+@router.post("/itad/search-save", response_model=ITADSearchSaveResponse)
+def search_and_save_itad_games(
+    session: Annotated[Session, Depends(get_session)],
+    title: Annotated[str, Query(min_length=1, max_length=120)],
+    results: Annotated[int, Query(ge=1, le=50)] = 12,
+    country: Annotated[str, Query(min_length=2, max_length=2)] = "PL",
+) -> ITADSearchSaveResponse:
+    """Search ITAD for games by title and save results to the database."""
+    api_key = _get_api_key()
+    country_upper = country.upper()
+
+    with httpx.Client(
+        base_url=_get_base_url(),
+        timeout=_get_timeout_seconds(),
+        params={"key": api_key},
+    ) as client:
+        search_payload = _itad_request(
+            client,
+            "GET",
+            "/games/search/v1",
+            params={"title": title, "results": results},
+        )
+
+        if not isinstance(search_payload, list):
+            raise HTTPException(
+                status_code=status.HTTP_502_BAD_GATEWAY,
+                detail="Unexpected ITAD search response format.",
+            )
+
+        games = [
+            item
+            for item in search_payload
+            if isinstance(item, dict)
+            and isinstance(item.get("id"), str)
+            and isinstance(item.get("slug"), str)
+            and isinstance(item.get("title"), str)
+        ]
+
+        if not games:
+            return ITADSearchSaveResponse(
+                source="isthereanydeal",
+                country=country_upper,
+                query=title,
+                games_found=0,
+                products_synced=0,
+                products_created=0,
+                products_updated=0,
+                stores_created=0,
+                prices_created=0,
+                prices_updated=0,
+                history_created=0,
+            )
+
+        games = _hydrate_games_with_assets(client, games)
+
+        game_ids = [g["id"] for g in games]
+        prices_payload = _itad_request(
+            client,
+            "POST",
+            "/games/prices/v3",
+            params={"country": country_upper, "deals": False, "vouchers": True},
+            json_body=game_ids,
+        )
+
+    if not isinstance(prices_payload, list):
+        raise HTTPException(
+            status_code=status.HTTP_502_BAD_GATEWAY,
+            detail="Unexpected ITAD prices response format.",
+        )
+
+    counts, products_by_game_id = _save_games_to_db(
+        session, games, prices_payload
+    )
+    session.commit()
+
+    return ITADSearchSaveResponse(
+        source="isthereanydeal",
+        country=country_upper,
+        query=title,
+        games_found=len(games),
+        products_synced=len(products_by_game_id),
+        **counts,
     )

@@ -16,6 +16,7 @@ import { humanizeCategory } from "../lib/utils";
 interface SidebarProps {
   stores: StoreRead[];
   categories: string[];
+  showCategories?: boolean;
 }
 
 const INITIAL_VISIBLE = 7;
@@ -30,7 +31,7 @@ const sortOptions: Array<{ label: string; value: ProductSort }> = [
   { label: "Kategorie", value: "category" },
 ];
 
-export default function Sidebar({ stores, categories }: SidebarProps) {
+export default function Sidebar({ stores, categories, showCategories = true }: SidebarProps) {
   const router = useRouter();
   const pathname = usePathname();
   const searchParams = useSearchParams();
@@ -91,64 +92,68 @@ export default function Sidebar({ stores, categories }: SidebarProps) {
         <div className="h-px bg-border/60" />
 
         {/* Categories */}
-        <div className="flex flex-col gap-2.5">
-          <span className="eyebrow">
-            <Sparkles className="h-3.5 w-3.5" />
-            Kategorie
-          </span>
-          <div className="flex flex-col gap-0.5">
-            <button
-              type="button"
-              onClick={() => updateParams({ category: null })}
-              className={`flex items-center gap-2.5 rounded-xl px-3 py-2 text-left text-sm transition-colors ${
-                !activeCategory
-                  ? "bg-accent/10 font-semibold text-accent"
-                  : "text-text-secondary hover:bg-bg-tertiary/50 hover:text-text-primary"
-              }`}
-            >
-              <Tag
-                className={`h-3.5 w-3.5 ${!activeCategory ? "text-accent" : "text-text-muted"}`}
-              />
-              Wszystkie
-            </button>
-            {visibleCategories.map((cat) => {
-              const isActive = activeCategory === cat;
-              return (
+        {showCategories && (
+          <>
+            <div className="flex flex-col gap-2.5">
+              <span className="eyebrow">
+                <Sparkles className="h-3.5 w-3.5" />
+                Kategorie
+              </span>
+              <div className="flex flex-col gap-0.5">
                 <button
-                  key={cat}
                   type="button"
-                  onClick={() => updateParams({ category: cat })}
+                  onClick={() => updateParams({ category: null })}
                   className={`flex items-center gap-2.5 rounded-xl px-3 py-2 text-left text-sm transition-colors ${
-                    isActive
+                    !activeCategory
                       ? "bg-accent/10 font-semibold text-accent"
                       : "text-text-secondary hover:bg-bg-tertiary/50 hover:text-text-primary"
                   }`}
                 >
                   <Tag
-                    className={`h-3.5 w-3.5 ${isActive ? "text-accent" : "text-text-muted"}`}
+                    className={`h-3.5 w-3.5 ${!activeCategory ? "text-accent" : "text-text-muted"}`}
                   />
-                  {humanizeCategory(cat)}
+                  Wszystkie
                 </button>
-              );
-            })}
-            {hasMore && (
-              <button
-                type="button"
-                onClick={() => setShowAllCategories((prev) => !prev)}
-                className="mt-1 flex items-center gap-1.5 px-3 text-xs font-semibold text-accent hover:text-accent/80"
-              >
-                <ChevronDown
-                  className={`h-3.5 w-3.5 transition-transform ${showAllCategories ? "rotate-180" : ""}`}
-                />
-                {showAllCategories
-                  ? "Zwiń"
-                  : `Pokaż więcej (${categories.length - INITIAL_VISIBLE})`}
-              </button>
-            )}
-          </div>
-        </div>
+                {visibleCategories.map((cat) => {
+                  const isActive = activeCategory === cat;
+                  return (
+                    <button
+                      key={cat}
+                      type="button"
+                      onClick={() => updateParams({ category: cat })}
+                      className={`flex items-center gap-2.5 rounded-xl px-3 py-2 text-left text-sm transition-colors ${
+                        isActive
+                          ? "bg-accent/10 font-semibold text-accent"
+                          : "text-text-secondary hover:bg-bg-tertiary/50 hover:text-text-primary"
+                      }`}
+                    >
+                      <Tag
+                        className={`h-3.5 w-3.5 ${isActive ? "text-accent" : "text-text-muted"}`}
+                      />
+                      {humanizeCategory(cat)}
+                    </button>
+                  );
+                })}
+                {hasMore && (
+                  <button
+                    type="button"
+                    onClick={() => setShowAllCategories((prev) => !prev)}
+                    className="mt-1 flex items-center gap-1.5 px-3 text-xs font-semibold text-accent hover:text-accent/80"
+                  >
+                    <ChevronDown
+                      className={`h-3.5 w-3.5 transition-transform ${showAllCategories ? "rotate-180" : ""}`}
+                    />
+                    {showAllCategories
+                      ? "Zwiń"
+                      : `Pokaż więcej (${categories.length - INITIAL_VISIBLE})`}
+                  </button>
+                )}
+              </div>
+            </div>
 
-        <div className="h-px bg-border/60" />
+            <div className="h-px bg-border/60" />
+          </>
+        )}
 
         {/* Stores */}
         {stores.length > 0 && (
