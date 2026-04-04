@@ -14,13 +14,22 @@ const API_BASES = process.env.INTERNAL_API_URL
   ? [process.env.INTERNAL_API_URL]
   : ["http://localhost:8000", "http://api:8000"];
 
-async function fetchServer<T>(path: string, revalidate = 60): Promise<T> {
+interface ServerFetchOptions {
+  revalidate?: number;
+  fresh?: boolean;
+}
+
+async function fetchServer<T>(
+  path: string,
+  options: ServerFetchOptions = {},
+): Promise<T> {
+  const { revalidate = 60, fresh = false } = options;
   let lastError: Error | undefined;
 
   for (const base of API_BASES) {
     try {
       const res = await fetch(`${base}${path}`, {
-        next: { revalidate },
+        ...(fresh ? { cache: "no-store" } : { next: { revalidate } }),
       });
       if (!res.ok) {
         throw new Error(`API error ${res.status}: ${path}`);
@@ -46,7 +55,7 @@ export async function getProducts(params: {
   sort?: ProductSort;
   page?: number;
   page_size?: number;
-} = {}): Promise<ProductWithPricesListResponse> {
+} = {}, options: ServerFetchOptions = {}): Promise<ProductWithPricesListResponse> {
   const sp = new URLSearchParams();
   if (params.search) sp.set("search", params.search);
   if (params.category) sp.set("category", params.category);
@@ -55,7 +64,7 @@ export async function getProducts(params: {
   if (params.page) sp.set("page", String(params.page));
   if (params.page_size) sp.set("page_size", String(params.page_size));
   const qs = sp.toString();
-  return fetchServer(`/products/with-prices${qs ? `?${qs}` : ""}`);
+  return fetchServer(`/products/with-prices${qs ? `?${qs}` : ""}`, options);
 }
 
 export async function getProductDetail(slug: string): Promise<ProductDetailResponse> {
@@ -72,13 +81,13 @@ export async function getStores(params: {
   search?: string;
   page?: number;
   page_size?: number;
-} = {}): Promise<StoreListResponse> {
+} = {}, options: ServerFetchOptions = {}): Promise<StoreListResponse> {
   const sp = new URLSearchParams();
   if (params.search) sp.set("search", params.search);
   if (params.page) sp.set("page", String(params.page));
   if (params.page_size) sp.set("page_size", String(params.page_size));
   const qs = sp.toString();
-  return fetchServer(`/stores${qs ? `?${qs}` : ""}`);
+  return fetchServer(`/stores${qs ? `?${qs}` : ""}`, options);
 }
 
 export async function getStore(slug: string): Promise<StoreRead> {

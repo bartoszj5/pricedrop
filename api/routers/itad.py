@@ -172,6 +172,22 @@ def _image_from_assets(game: dict[str, Any]) -> str | None:
     return None
 
 
+def _normalize_product_category(game_type: Any) -> str:
+    if not isinstance(game_type, str):
+        return "game"
+
+    normalized = game_type.strip().casefold()
+    if not normalized:
+        return "game"
+
+    # ITAD often marks full base editions as "package".
+    # In the local catalog they should behave like regular games.
+    if normalized == "package":
+        return "game"
+
+    return normalized
+
+
 def _merge_game_with_info(game: dict[str, Any], info: dict[str, Any]) -> dict[str, Any]:
     merged = dict(game)
 
@@ -261,7 +277,7 @@ def _save_games_to_db(
         game_id = str(game["id"])
         slug = str(game["slug"])
         title = str(game["title"])
-        category = str(game.get("type") or "game")
+        category = _normalize_product_category(game.get("type"))
         image_url = _image_from_assets(game)
 
         product = session.exec(select(Product).where(Product.slug == slug)).first()

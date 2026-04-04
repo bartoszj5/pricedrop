@@ -163,7 +163,11 @@ def _apply_product_filters(
             statement = statement.where(condition)
 
     if category and category.strip():
-        statement = statement.where(Product.category == category.strip())
+        normalized_category = category.strip().casefold()
+        if normalized_category == "game":
+            statement = statement.where(Product.category.in_(("game", "package")))
+        else:
+            statement = statement.where(Product.category == normalized_category)
 
     if store and store.strip():
         normalized_store = store.strip()

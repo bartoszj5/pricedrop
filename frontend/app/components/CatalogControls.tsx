@@ -23,7 +23,7 @@ import {
 } from "react";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import type { ProductSort, StoreRead } from "../types";
-import { humanizeCategory } from "../lib/utils";
+import { humanizeCategory, polishPlural } from "../lib/utils";
 import { searchAndSaveGames } from "../lib/api";
 import type { ITADSearchSaveResponse } from "../lib/api";
 
@@ -292,11 +292,7 @@ export default function CatalogControls({
           <div className="space-y-1">
             <h3 className="text-lg text-text-primary">
               Znaleziono {itadResult.games_found}{" "}
-              {itadResult.games_found === 1
-                ? "grę"
-                : itadResult.games_found < 5
-                  ? "gry"
-                  : "gier"}
+              {polishPlural(itadResult.games_found, "wynik", "wyniki", "wyników")}
             </h3>
             <p className="text-sm leading-6 text-text-secondary">
               Zapisano do bazy: {itadResult.products_created} nowych,{" "}

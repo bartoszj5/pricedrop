@@ -5,6 +5,7 @@ import Sidebar from "../components/Sidebar";
 import ProductCard from "../components/ProductCard";
 import Pagination from "../components/Pagination";
 import EmptyState from "../components/EmptyState";
+import { polishPlural } from "../lib/utils";
 import type { ProductSort, ProductWithBestPrice } from "../types";
 
 export const metadata: Metadata = {
@@ -33,8 +34,8 @@ export default async function GamesPage({ searchParams }: PageProps) {
       sort: sort as ProductSort | undefined,
       page,
       page_size: 24,
-    }),
-    getStores({ page_size: 100 }),
+    }, { fresh: true }),
+    getStores({ page_size: 100 }, { fresh: true }),
   ]);
 
   const items = productsData.items;
@@ -60,7 +61,7 @@ export default async function GamesPage({ searchParams }: PageProps) {
     : null;
 
   const subtitleParts = [
-    `${productsData.total} gier w bazie`,
+    `${productsData.total} ${polishPlural(productsData.total, "gra", "gry", "gier")} w bazie`,
     activeStoreName ? `sklep: ${activeStoreName}` : null,
     sort ? `sortowanie: ${sort.replace("_", " ")}` : "tryb: najlepsze okazje",
   ].filter(Boolean);
