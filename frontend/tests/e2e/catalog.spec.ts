@@ -24,7 +24,7 @@ test("home page hides ITAD game results", async ({
   await page.goto("/?search=baldur");
   await expect(page.getByText("Brak produktów dla tego zestawu filtrów")).toBeVisible();
   await expect(
-    page.getByText("gry z ITAD są dostępne w osobnej zakładce Gry", { exact: false }),
+    page.getByText("pełny katalog gier jest w zakładce Gry", { exact: false }),
   ).toBeVisible();
 });
 
@@ -61,18 +61,19 @@ test("store detail paginates large inventories", async ({ page }) => {
   await expect(inventorySection.locator("article")).toHaveCount(24);
 });
 
-test("search page filters locally before explicit ITAD sync", async ({ page }) => {
+test("games search updates URL without exposing import control", async ({
+  page,
+}) => {
   await page.goto("/search");
 
-  const input = page.getByLabel("Filtruj katalog gier po tytule");
+  const input = page.getByLabel("Szukaj gier po tytule");
   await input.fill("Baldur");
   await page.waitForTimeout(600);
 
   await expect(page).toHaveURL(/search=Baldur/);
-  await expect(page.getByText("Zapisano do bazy:")).toHaveCount(0);
-
-  await page.getByRole("button", { name: "Importuj z ITAD" }).click();
-  await expect(page.getByText("Zapisano do bazy:")).toBeVisible();
+  await expect(
+    page.getByRole("button", { name: "Importuj z ITAD" }),
+  ).toHaveCount(0);
 });
 
 test("mobile filter drawer closes after selecting a filter", async ({ page }) => {

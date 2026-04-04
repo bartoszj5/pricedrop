@@ -72,7 +72,7 @@ export default async function Home({ searchParams }: PageProps) {
           {items.length === 0 ? (
             <EmptyState
               message="Brak produktów dla tego zestawu filtrów"
-              detail="Spróbuj zmienić kategorię, sklep albo frazę wyszukiwania. Strona główna pokazuje tylko elektronikę i produkty sklepowe, a gry z ITAD są dostępne w osobnej zakładce Gry."
+              detail="Spróbuj zmienić kategorię, sklep albo frazę wyszukiwania. Strona główna pokazuje elektronikę i produkty sklepowe — pełny katalog gier jest w zakładce Gry."
               actionHref="/"
               actionLabel="Wróć do pełnego katalogu"
             />

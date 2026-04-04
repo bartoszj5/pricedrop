@@ -2,7 +2,6 @@
 
 import {
   AlertTriangle,
-  Check,
   Filter,
   Loader2,
   Search,
@@ -10,7 +9,6 @@ import {
   X,
 } from "lucide-react";
 import {
-  startTransition,
   useEffect,
   useEffectEvent,
   useRef,
@@ -20,8 +18,12 @@ import {
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import CatalogFiltersContent from "./CatalogFiltersContent";
 import { syncGamesAction } from "../search/actions";
-import { polishPlural } from "../lib/utils";
-import type { ITADSearchSaveResponse, ProductSort, StoreRead } from "../types";
+import type { ProductSort, StoreRead } from "../types";
+
+export interface CatalogLookupIssue {
+  message: string;
+  isConfig: boolean;
+}
 
 interface CatalogControlsProps {
   stores: StoreRead[];
@@ -42,11 +44,15 @@ export default function CatalogControls({
   const [mobileOpen, setMobileOpen] = useState(false);
   const [showAllCategories, setShowAllCategories] = useState(false);
   const [searchValue, setSearchValue] = useState(searchParams.get("search") ?? "");
-  const [itadError, setItadError] = useState<string | null>(null);
-  const [itadConfigError, setItadConfigError] = useState(false);
-  const [itadResult, setItadResult] = useState<ITADSearchSaveResponse | null>(null);
-  const [isSyncPending, startSyncTransition] = useTransition();
+  const [isSearchNavPending, startNavTransition] = useTransition();
+  const [isEnrichingCatalog, setIsEnrichingCatalog] = useState(false);
+  const [lookupIssue, setLookupIssue] = useState<CatalogLookupIssue | null>(null);
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  /** Zapobiega wielokrotnemu sync przy tym samym `?search=` (np. po `router.refresh()`). */
+  const enrichCompletedForRef = useRef<string | null>(null);
+
+  const urlSearchQuery = searchParams.get("search") ?? "";
+  const trimmedUrlSearch = urlSearchQuery.trim();
 
   const activeCategory = searchParams.get("category") ?? "";
   const activeStore = searchParams.get("store") ?? "";
@@ -64,6 +70,51 @@ export default function CatalogControls({
     setSearchValue(searchParams.get("search") ?? "");
   }, [searchParams]);
 
+  useEffect(() => {
+    if (!enableItadSearch) return;
+    if (!trimmedUrlSearch) {
+      enrichCompletedForRef.current = null;
+      setLookupIssue(null);
+      setIsEnrichingCatalog(false);
+      return;
+    }
+
+    if (enrichCompletedForRef.current === trimmedUrlSearch) {
+      return;
+    }
+
+    let cancelled = false;
+    setIsEnrichingCatalog(true);
+    setLookupIssue(null);
+
+    void (async () => {
+      try {
+        const result = await syncGamesAction(trimmedUrlSearch);
+        if (cancelled) return;
+        if (!result.ok) {
+          setLookupIssue({
+            message:
+              result.error ?? "Nie udało się uzupełnić katalogu gier.",
+            isConfig: Boolean(result.isConfigError),
+          });
+          enrichCompletedForRef.current = null;
+          return;
+        }
+        setLookupIssue(null);
+        enrichCompletedForRef.current = trimmedUrlSearch;
+        router.refresh();
+      } finally {
+        if (!cancelled) {
+          setIsEnrichingCatalog(false);
+        }
+      }
+    })();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [enableItadSearch, trimmedUrlSearch, router]);
+
   function buildUrl(changes: Record<string, string | null>) {
     const params = new URLSearchParams(searchParams.toString());
     for (const [key, value] of Object.entries(changes)) {
@@ -80,7 +131,7 @@ export default function CatalogControls({
 
   const applySearchNavigation = useEffectEvent((value: string) => {
     const nextUrl = buildUrl({ search: value.trim() || null });
-    startTransition(() => {
+    startNavTransition(() => {
       router.replace(nextUrl, { scroll: false });
     });
   });
@@ -106,56 +157,19 @@ export default function CatalogControls({
 
   function updateParams(changes: Record<string, string | null>) {
     const nextUrl = buildUrl(changes);
-    startTransition(() => {
+    startNavTransition(() => {
       router.replace(nextUrl, { scroll: false });
     });
   }
 
   function resetFilters() {
     setSearchValue("");
-    setItadError(null);
-    setItadConfigError(false);
-    setItadResult(null);
-    startTransition(() => {
+    startNavTransition(() => {
       router.replace(pathname, { scroll: false });
     });
   }
 
-  async function handleSync() {
-    const trimmedSearch = searchValue.trim();
-    if (!trimmedSearch) return;
-
-    if (debounceRef.current) {
-      clearTimeout(debounceRef.current);
-    }
-
-    setItadError(null);
-    setItadConfigError(false);
-    setItadResult(null);
-
-    startSyncTransition(async () => {
-      const result = await syncGamesAction(trimmedSearch);
-
-      if (!result.ok) {
-        setItadError(result.error ?? "Nie udało się pobrać wyników z ITAD.");
-        setItadConfigError(Boolean(result.isConfigError));
-        return;
-      }
-
-      setItadResult(result.data ?? null);
-
-      const currentSearch = searchParams.get("search") ?? "";
-      const nextUrl = buildUrl({ search: trimmedSearch });
-
-      startTransition(() => {
-        if (currentSearch !== trimmedSearch) {
-          router.replace(nextUrl, { scroll: false });
-        } else {
-          router.refresh();
-        }
-      });
-    });
-  }
+  const showGamesNavSpinner = enableItadSearch && isSearchNavPending;
 
   return (
     <>
@@ -165,20 +179,27 @@ export default function CatalogControls({
             <label className="flex min-h-14 flex-1 items-center gap-3 rounded-[24px] border border-border bg-bg-card px-5 shadow-[var(--shadow-card)]">
               <span className="sr-only">
                 {enableItadSearch
-                  ? "Filtruj katalog gier po tytule"
+                  ? "Szukaj gier po tytule"
                   : "Filtruj katalog po nazwie produktu"}
               </span>
-              <Search className="h-5 w-5 shrink-0 text-text-muted" />
+              {showGamesNavSpinner ? (
+                <Loader2
+                  className="h-5 w-5 shrink-0 animate-spin text-text-muted"
+                  aria-hidden
+                />
+              ) : (
+                <Search className="h-5 w-5 shrink-0 text-text-muted" />
+              )}
               <input
                 type="search"
                 aria-label={
                   enableItadSearch
-                    ? "Filtruj katalog gier po tytule"
+                    ? "Szukaj gier po tytule"
                     : "Filtruj katalog po nazwie produktu"
                 }
                 placeholder={
                   enableItadSearch
-                    ? "Filtruj gry po tytule (np. Baldur, Cyberpunk, Witcher)"
+                    ? "Szukaj gry po tytule (np. Baldur, Cyberpunk, Witcher)"
                     : "Szukaj sprzętu, gier, akcesoriów i konkretnych modeli"
                 }
                 value={searchValue}
@@ -186,22 +207,6 @@ export default function CatalogControls({
                 className="w-full bg-transparent py-4 text-base text-text-primary outline-none placeholder:text-text-muted"
               />
             </label>
-
-            {enableItadSearch && (
-              <button
-                type="button"
-                onClick={handleSync}
-                disabled={isSyncPending || !searchValue.trim()}
-                className="inline-flex h-14 items-center justify-center gap-2 rounded-[24px] border border-accent bg-accent px-6 text-sm font-semibold text-white disabled:cursor-not-allowed disabled:opacity-50"
-              >
-                {isSyncPending ? (
-                  <Loader2 className="h-4 w-4 animate-spin" />
-                ) : (
-                  <Search className="h-4 w-4" />
-                )}
-                Importuj z ITAD
-              </button>
-            )}
 
             <button
               type="button"
@@ -219,30 +224,32 @@ export default function CatalogControls({
             </button>
           </div>
 
-          {enableItadSearch && (
-            <p className="text-sm leading-6 text-text-secondary">
-              Wpisywanie w polu powyżej filtruje gry już zapisane w katalogu.
-              Użyj przycisku importu tylko wtedy, gdy chcesz dociągnąć nowe
-              wyniki z IsThereAnyDeal do bazy.
+          {enableItadSearch && isEnrichingCatalog && trimmedUrlSearch ? (
+            <p className="flex items-center gap-2 text-xs text-text-muted">
+              <Loader2
+                className="h-3.5 w-3.5 shrink-0 animate-spin"
+                aria-hidden
+              />
+              Uzupełniamy katalog w tle…
             </p>
-          )}
+          ) : null}
         </div>
       </section>
 
-      {enableItadSearch && itadError && (
+      {enableItadSearch && lookupIssue && (
         <div
           className={`section-subtle flex items-start gap-4 p-5 ${
-            itadConfigError
+            lookupIssue.isConfig
               ? "border-accent-amber/40 bg-[#fff4df]"
               : "border-accent-red/30 bg-[#fff0eb]"
           }`}
         >
           <div
             className={`flex h-11 w-11 shrink-0 items-center justify-center rounded-full ${
-              itadConfigError ? "bg-[#f5e1b5]" : "bg-[#f1d7cf]"
+              lookupIssue.isConfig ? "bg-[#f5e1b5]" : "bg-[#f1d7cf]"
             }`}
           >
-            {itadConfigError ? (
+            {lookupIssue.isConfig ? (
               <Settings2 className="h-5 w-5 text-accent-amber" />
             ) : (
               <AlertTriangle className="h-5 w-5 text-accent-red" />
@@ -250,37 +257,12 @@ export default function CatalogControls({
           </div>
           <div className="space-y-1">
             <h3 className="text-lg text-text-primary">
-              {itadConfigError
-                ? "Moduł wymaga konfiguracji"
-                : "Synchronizacja nie powiodła się"}
-            </h3>
-            <p className="text-sm leading-6 text-text-secondary">{itadError}</p>
-          </div>
-        </div>
-      )}
-
-      {enableItadSearch && itadResult && !itadError && (
-        <div className="section-subtle flex items-start gap-4 border-accent-green/30 bg-[#edf9ee] p-5">
-          <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-full bg-accent-green-soft">
-            <Check className="h-5 w-5 text-accent-green" />
-          </div>
-          <div className="space-y-1">
-            <h3 className="text-lg text-text-primary">
-              Znaleziono {itadResult.games_found}{" "}
-              {polishPlural(
-                itadResult.games_found,
-                "wynik",
-                "wyniki",
-                "wyników",
-              )}
+              {lookupIssue.isConfig
+                ? "Wyszukiwarka gier wymaga konfiguracji"
+                : "Nie udało się odświeżyć wyników"}
             </h3>
             <p className="text-sm leading-6 text-text-secondary">
-              Zapisano do bazy: {itadResult.products_created} nowych,{" "}
-              {itadResult.products_updated} zaktualizowanych.{" "}
-              {itadResult.prices_created > 0 &&
-                `Dodano ${itadResult.prices_created} cen. `}
-              {itadResult.prices_updated > 0 &&
-                `Zaktualizowano ${itadResult.prices_updated} cen. `}
+              {lookupIssue.message}
             </p>
           </div>
         </div>

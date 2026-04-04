@@ -28,6 +28,8 @@ export default async function GamesPage({ searchParams }: PageProps) {
     typeof params.store === "string" ? params.store : undefined;
   const sort = typeof params.sort === "string" ? params.sort : undefined;
 
+  const trimmedSearch = search?.trim();
+
   const [productsData, storesData] = await Promise.all([
     getProducts({
       search,
@@ -46,7 +48,7 @@ export default async function GamesPage({ searchParams }: PageProps) {
 
   return (
     <main className="page-shell flex flex-col gap-6">
-      {/* Search + filters (ITAD integration for games) */}
+      {/* Wyniki od razu z bazy; uzupełnianie katalogu w tle — patrz CatalogControls */}
       <CatalogControls
         stores={storesData.items}
         categories={productsData.categories ?? []}
@@ -64,8 +66,16 @@ export default async function GamesPage({ searchParams }: PageProps) {
         <div className="flex min-w-0 flex-1 flex-col gap-6">
           {items.length === 0 ? (
             <EmptyState
-              message="Brak gier w bazie"
-              detail="Filtrowanie nie znalazło jeszcze zapisanych gier. Użyj przycisku importu z ITAD, jeśli chcesz dociągnąć nowe wyniki do bazy."
+              message={
+                trimmedSearch
+                  ? "Nie znaleziono gier dla tego wyszukiwania"
+                  : "Brak gier w katalogu"
+              }
+              detail={
+                trimmedSearch
+                  ? "To mogą być wyniki wyłącznie lokalne — poczekaj chwilę, w tle uzupełniamy katalog o nowe tytuły. Możesz też spróbować innej frazy."
+                  : "Wpisz tytuł w wyszukiwarce powyżej, aby dodać gry do katalogu i zobaczyć oferty."
+              }
             />
           ) : (
             <>
@@ -89,7 +99,7 @@ export default async function GamesPage({ searchParams }: PageProps) {
                 ) : (
                   <EmptyState
                     message="Brak aktywnych ofert"
-                    detail="Gry na tej stronie są w monitoringu — wyszukaj nowe tytuły, aby dodać oferty."
+                    detail="Te gry są w monitoringu — wyszukaj inny tytuł lub wróć później, gdy pojawią się ceny."
                   />
                 )}
               </section>

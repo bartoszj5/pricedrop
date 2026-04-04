@@ -17,7 +17,7 @@ export async function syncGamesAction(
   if (!trimmedTitle) {
     return {
       ok: false,
-      error: "Podaj tytuł gry do synchronizacji.",
+      error: "Podaj tytuł gry do wyszukania.",
       isConfigError: false,
     };
   }
@@ -36,7 +36,7 @@ export async function syncGamesAction(
 
     return {
       ok: false,
-      error: "Nie udało się zsynchronizować wyników z ITAD.",
+      error: "Nie udało się uzupełnić katalogu gier.",
       isConfigError: false,
     };
   }
