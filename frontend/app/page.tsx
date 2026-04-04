@@ -59,48 +59,6 @@ export default async function Home({ searchParams }: PageProps) {
 
   return (
     <main className="page-shell flex flex-col gap-6">
-      <section className="section-card grid gap-8 p-6 md:p-8 xl:grid-cols-[1.25fr_0.75fr]">
-        <div className="relative z-10 flex flex-col gap-4">
-          <span className="eyebrow">PriceDrop / szeroki katalog okazji</span>
-          <h1 className="display-title max-w-4xl text-5xl text-text-primary md:text-7xl">
-            {title}
-          </h1>
-          <p className="max-w-3xl text-base leading-7 text-text-secondary md:text-lg">
-            PriceDrop rozdziela produkty z realną ceną od tych, które są dopiero
-            w monitoringu. Dzięki temu nie przeglądasz atrap okazji, tylko
-            widzisz, gdzie rynek faktycznie już żyje.
-          </p>
-          <div className="flex flex-wrap gap-2 text-sm text-text-secondary">
-            {subtitleParts.map((part) => (
-              <span key={part} className="paper-chip">
-                {part}
-              </span>
-            ))}
-          </div>
-        </div>
-
-        <div className="grid gap-3 sm:grid-cols-3 xl:grid-cols-1">
-          <div className="section-subtle p-5">
-            <p className="text-xs font-semibold uppercase tracking-[0.16em] text-text-muted">
-              Na tej stronie
-            </p>
-            <p className="mt-2 text-4xl text-text-primary">{items.length}</p>
-          </div>
-          <div className="section-subtle p-5">
-            <p className="text-xs font-semibold uppercase tracking-[0.16em] text-text-muted">
-              Aktywne okazje
-            </p>
-            <p className="mt-2 text-4xl text-accent-green">{activeOffers.length}</p>
-          </div>
-          <div className="section-subtle p-5">
-            <p className="text-xs font-semibold uppercase tracking-[0.16em] text-text-muted">
-              Produkty w monitoringu
-            </p>
-            <p className="mt-2 text-4xl text-text-primary">{trackedOnly.length}</p>
-          </div>
-        </div>
-      </section>
-
       <CatalogControls
         stores={storesData.items}
         categories={productsData.categories ?? []}
