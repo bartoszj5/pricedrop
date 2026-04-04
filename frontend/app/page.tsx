@@ -5,6 +5,7 @@ import FeaturedBanner from "./components/FeaturedBanner";
 import ProductCard from "./components/ProductCard";
 import Pagination from "./components/Pagination";
 import EmptyState from "./components/EmptyState";
+import { isGameLikeCategory, isMainCatalogVisibleProduct } from "./lib/normalize";
 import type { ProductSort, ProductWithBestPrice } from "./types";
 
 export const dynamic = "force-dynamic";
@@ -33,7 +34,10 @@ export default async function Home({ searchParams }: PageProps) {
     getStores({ page_size: 100 }),
   ]);
 
-  const items = productsData.items;
+  const categories = (productsData.categories ?? []).filter(
+    (value) => !isGameLikeCategory(value),
+  );
+  const items = productsData.items.filter(isMainCatalogVisibleProduct);
   const activeOffers = items.filter((product) => product.best_price != null);
   const trackedOnly = items.filter((product) => product.best_price == null);
   const featuredPool = activeOffers;
@@ -48,13 +52,13 @@ export default async function Home({ searchParams }: PageProps) {
     <main className="page-shell flex flex-col gap-6">
       <CatalogControls
         stores={storesData.items}
-        categories={productsData.categories ?? []}
+        categories={categories}
       />
 
       <div className="flex gap-6">
         <Sidebar
           stores={storesData.items}
-          categories={productsData.categories ?? []}
+          categories={categories}
         />
 
         <div className="flex min-w-0 flex-1 flex-col gap-6">
@@ -68,7 +72,7 @@ export default async function Home({ searchParams }: PageProps) {
           {items.length === 0 ? (
             <EmptyState
               message="Brak produktów dla tego zestawu filtrów"
-              detail="Spróbuj zmienić kategorię, sklep albo frazę wyszukiwania. Katalog rozdziela aktywne oferty od monitoringu, więc przy ostrych filtrach wynik może być pusty."
+              detail="Spróbuj zmienić kategorię, sklep albo frazę wyszukiwania. Strona główna pokazuje tylko elektronikę i produkty sklepowe, a gry z ITAD są dostępne w osobnej zakładce Gry."
               actionHref="/"
               actionLabel="Wróć do pełnego katalogu"
             />

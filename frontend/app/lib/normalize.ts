@@ -91,6 +91,40 @@ export function normalizePriceListResponse(
   };
 }
 
+const GAME_LIKE_CATEGORIES = new Set(["game", "package", "dlc"]);
+
+function normalizeCategory(category: string | null | undefined): string {
+  return (category ?? "").trim().toLowerCase();
+}
+
+export function isGameLikeCategory(category: string | null | undefined) {
+  return GAME_LIKE_CATEGORIES.has(normalizeCategory(category));
+}
+
+export function isFreeGameProduct(product: {
+  category: string | null | undefined;
+  best_price: number | null;
+}) {
+  return (
+    product.best_price != null
+    && product.best_price <= 0
+    && isGameLikeCategory(product.category)
+  );
+}
+
+export function isMainCatalogVisibleProduct(product: {
+  category: string | null | undefined;
+}) {
+  return !isGameLikeCategory(product.category);
+}
+
+export function isCatalogVisibleProduct(product: {
+  category: string | null | undefined;
+  best_price: number | null;
+}) {
+  return !isFreeGameProduct(product);
+}
+
 export function isActiveOffer(price: { current_price: number | null; is_available: boolean | null }) {
   return price.is_available === true && price.current_price != null;
 }

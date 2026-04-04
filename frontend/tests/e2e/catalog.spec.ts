@@ -3,16 +3,7 @@ import { expect, test } from "@playwright/test";
 const API_BASE_URL =
   process.env.PLAYWRIGHT_API_BASE_URL ?? "http://127.0.0.1:8000";
 
-function formatPlnPrice(value: number) {
-  return new Intl.NumberFormat("pl-PL", {
-    style: "currency",
-    currency: "PLN",
-    minimumFractionDigits: 2,
-    maximumFractionDigits: 2,
-  }).format(value);
-}
-
-test("home page highlights the real cheapest Baldur offer", async ({
+test("home page hides ITAD game results", async ({
   page,
   request,
 }) => {
@@ -22,33 +13,19 @@ test("home page highlights the real cheapest Baldur offer", async ({
   expect(response.ok()).toBeTruthy();
 
   const payload = (await response.json()) as {
-    items: Array<{ title: string; best_price: string | number | null }>;
+    items: Array<{ title: string; category: string }>;
   };
 
-  const expectedFeatured = payload.items.reduce<{
-    title: string;
-    best_price: string | number | null;
-  } | null>((best, item) => {
-    if (item.best_price == null) return best;
-    const price = Number(item.best_price);
-    if (!best || best.best_price == null || price < Number(best.best_price)) {
-      return item;
-    }
-    return best;
-  }, null);
-
-  expect(expectedFeatured).not.toBeNull();
+  const hasGameLikeResult = payload.items.some((item) =>
+    ["game", "package"].includes(item.category.toLowerCase()),
+  );
+  expect(hasGameLikeResult).toBeTruthy();
 
   await page.goto("/?search=baldur");
-
-  const featuredBanner = page.locator("section").filter({
-    hasText: "Najmocniejsza oferta na tej stronie",
-  }).first();
-
-  await expect(featuredBanner).toContainText(expectedFeatured!.title);
-  await expect(featuredBanner).toContainText(
-    formatPlnPrice(Number(expectedFeatured!.best_price)),
-  );
+  await expect(page.getByText("Brak produktów dla tego zestawu filtrów")).toBeVisible();
+  await expect(
+    page.getByText("gry z ITAD są dostępne w osobnej zakładce Gry", { exact: false }),
+  ).toBeVisible();
 });
 
 test("free offers remain visible on product detail", async ({ page }) => {

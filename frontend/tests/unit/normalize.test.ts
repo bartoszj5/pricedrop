@@ -1,5 +1,9 @@
 import { describe, expect, it } from "vitest";
 import {
+  isCatalogVisibleProduct,
+  isGameLikeCategory,
+  isFreeGameProduct,
+  isMainCatalogVisibleProduct,
   normalizePriceListResponse,
   normalizeProductDetailResponse,
   normalizeProductListResponse,
@@ -36,6 +40,56 @@ describe("normalize transport responses", () => {
     });
 
     expect(response.items[0]?.best_price).toBe(0);
+  });
+
+  it("marks free game-like products as hidden in catalog", () => {
+    expect(
+      isFreeGameProduct({
+        category: "game",
+        best_price: 0,
+      }),
+    ).toBe(true);
+
+    expect(
+      isFreeGameProduct({
+        category: "package",
+        best_price: 0,
+      }),
+    ).toBe(true);
+
+    expect(
+      isCatalogVisibleProduct({
+        category: "game",
+        best_price: 0,
+      }),
+    ).toBe(false);
+
+    expect(
+      isCatalogVisibleProduct({
+        category: "game",
+        best_price: 19.99,
+      }),
+    ).toBe(true);
+
+    expect(isGameLikeCategory(" package ")).toBe(true);
+
+    expect(
+      isMainCatalogVisibleProduct({
+        category: "game",
+      }),
+    ).toBe(false);
+
+    expect(
+      isMainCatalogVisibleProduct({
+        category: "package",
+      }),
+    ).toBe(false);
+
+    expect(
+      isMainCatalogVisibleProduct({
+        category: "laptop",
+      }),
+    ).toBe(true);
   });
 
   it("parses product detail prices and keeps inactive rows", () => {

@@ -5,6 +5,7 @@ import Sidebar from "../components/Sidebar";
 import ProductCard from "../components/ProductCard";
 import Pagination from "../components/Pagination";
 import EmptyState from "../components/EmptyState";
+import { isCatalogVisibleProduct } from "../lib/normalize";
 import type { ProductSort } from "../types";
 
 export const metadata: Metadata = {
@@ -39,7 +40,7 @@ export default async function GamesPage({ searchParams }: PageProps) {
     getStores({ page_size: 100 }, { fresh: true }),
   ]);
 
-  const items = productsData.items;
+  const items = productsData.items.filter(isCatalogVisibleProduct);
   const activeOffers = items.filter((p) => p.best_price != null);
   const trackedOnly = items.filter((p) => p.best_price == null);
 
