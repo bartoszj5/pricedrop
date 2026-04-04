@@ -1,7 +1,7 @@
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
-from routers import itad, prices, products, stores
+from routers import dedup, itad, prices, products, stores
 
 app = FastAPI(title="PriceDrop API")
 
@@ -12,6 +12,7 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+app.include_router(dedup.router)
 app.include_router(products.router)
 app.include_router(stores.router)
 app.include_router(prices.router)

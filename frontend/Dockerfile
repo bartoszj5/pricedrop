@@ -1,12 +1,31 @@
-FROM node:24-alpine
-
+FROM node:24-alpine AS base
 WORKDIR /app
 
-COPY package.json ./
-RUN npm install
+FROM base AS deps
+COPY package.json package-lock.json ./
+RUN npm ci
 
+FROM base AS builder
+ENV NODE_ENV=production
+COPY --from=deps /app/node_modules ./node_modules
 COPY . .
+RUN npm run build
 
+FROM base AS runner
+ENV NODE_ENV=production
+ENV PORT=3000
+ENV HOSTNAME=0.0.0.0
+
+
+RUN addgroup -S nodejs && adduser -S nextjs -G nodejs
+
+COPY --from=builder --chown=nextjs:nodejs /app/public ./public
+COPY --from=builder --chown=nextjs:nodejs /app/.next/standalone ./
+COPY --from=builder --chown=nextjs:nodejs /app/.next/static ./.next/static
+
+RUN mkdir -p /app/.next/cache && chown -R nextjs:nodejs /app/.next
+
+USER nextjs
 EXPOSE 3000
 
-CMD ["npm", "run", "dev"]
+CMD ["node", "server.js"]

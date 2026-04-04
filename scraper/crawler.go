@@ -71,18 +71,75 @@ func (r *CrawlerRegistry) RegisteredSlugs() []string {
 // Helpers
 // ---------------------------------------------------------------------------
 
+// categoryPrefixes contains common Polish electronics category words
+// that stores sometimes prepend to product titles (e.g. "Monitor LG ..." vs "LG ...").
+var categoryPrefixes = map[string]bool{
+	"monitor": true, "laptop": true, "notebook": true, "ultrabook": true,
+	"procesor": true, "dysk": true, "karta": true, "pamiec": true,
+	"drukarka": true, "router": true, "switch": true, "klawiatura": true,
+	"mysz": true, "myszka": true, "sluchawki": true, "glosnik": true,
+	"telewizor": true, "smartfon": true, "telefon": true, "tablet": true,
+	"konsola": true, "kontroler": true, "fotel": true, "krzeslo": true,
+	"biurko": true, "zasilacz": true, "obudowa": true, "chlodzenie": true,
+	"wentylator": true, "plyta": true, "glowna": true, "kamera": true,
+	"aparat": true, "obiektyw": true, "smartwatch": true, "zegarek": true,
+	"powerbank": true, "ladowarka": true, "kabel": true, "adapter": true,
+	"hub": true, "pendrive": true, "ssd": true, "hdd": true, "ram": true,
+	"graficzna": true, "sieciowa": true, "dzwiekowa": true, "twardy": true,
+	"zewnetrzny": true,
+}
+
+var diacriticReplacer = strings.NewReplacer(
+	"ą", "a", "ć", "c", "ę", "e", "ł", "l", "ń", "n",
+	"ó", "o", "ś", "s", "ź", "z", "ż", "z",
+)
+
+// specSuffixRegex matches Morele-style spec tails: ", 3.5 GHz, 32 MB, BOX (100-100000927BOX)"
+var specSuffixRegex = regexp.MustCompile(`,\s*\d.*$`)
+
+// partNumberRegex matches trailing parenthesised part numbers, e.g. "(YD3200C5FHBOX)"
+var partNumberRegex = regexp.MustCompile(`\s*\([A-Za-z0-9][-A-Za-z0-9]*\)\s*$`)
+
+// cleanProductTitle strips spec suffixes and part numbers from verbose store titles.
+func cleanProductTitle(title string) string {
+	title = specSuffixRegex.ReplaceAllString(title, "")
+	title = partNumberRegex.ReplaceAllString(title, "")
+	return strings.TrimSpace(title)
+}
+
+// normalizeTitle strips leading category prefix words from a product title
+// so that e.g. "Monitor LG UltraGear 34G600A-B" and "LG UltraGear 34G600A-B"
+// produce the same slug.
+func normalizeTitle(title string) string {
+	title = strings.TrimSpace(title)
+	if title == "" {
+		return title
+	}
+
+	words := strings.Fields(title)
+	stripped := 0
+	for stripped < len(words) {
+		w := strings.ToLower(words[stripped])
+		w = diacriticReplacer.Replace(w)
+		if !categoryPrefixes[w] {
+			break
+		}
+		stripped++
+	}
+
+	// Don't strip everything — keep at least one word.
+	if stripped > 0 && stripped < len(words) {
+		return strings.Join(words[stripped:], " ")
+	}
+	return title
+}
+
 var nonAlphanumRegex = regexp.MustCompile(`[^a-z0-9]+`)
 
 // slugify converts a product title to a URL-friendly slug.
 func slugify(s string) string {
 	s = strings.ToLower(strings.TrimSpace(s))
-
-	// Replace Polish diacritics.
-	r := strings.NewReplacer(
-		"ą", "a", "ć", "c", "ę", "e", "ł", "l", "ń", "n",
-		"ó", "o", "ś", "s", "ź", "z", "ż", "z",
-	)
-	s = r.Replace(s)
+	s = diacriticReplacer.Replace(s)
 
 	s = nonAlphanumRegex.ReplaceAllString(s, "-")
 	s = strings.Trim(s, "-")
