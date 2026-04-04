@@ -3,29 +3,25 @@
 import {
   AlertTriangle,
   Check,
-  ChevronDown,
   Filter,
   Loader2,
-  RotateCcw,
   Search,
   Settings2,
-  SlidersHorizontal,
-  Sparkles,
-  Store as StoreIcon,
-  Tag,
   X,
 } from "lucide-react";
 import {
   startTransition,
   useEffect,
+  useEffectEvent,
   useRef,
   useState,
+  useTransition,
 } from "react";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
-import type { ProductSort, StoreRead } from "../types";
-import { humanizeCategory, polishPlural } from "../lib/utils";
-import { searchAndSaveGames } from "../lib/api";
-import type { ITADSearchSaveResponse } from "../lib/api";
+import CatalogFiltersContent from "./CatalogFiltersContent";
+import { syncGamesAction } from "../search/actions";
+import { polishPlural } from "../lib/utils";
+import type { ITADSearchSaveResponse, ProductSort, StoreRead } from "../types";
 
 interface CatalogControlsProps {
   stores: StoreRead[];
@@ -33,18 +29,6 @@ interface CatalogControlsProps {
   showCategories?: boolean;
   enableItadSearch?: boolean;
 }
-
-const INITIAL_VISIBLE = 7;
-
-const sortOptions: Array<{ label: string; value: ProductSort }> = [
-  { label: "Najlepsze okazje", value: "featured" },
-  { label: "Cena rosnąco", value: "price_asc" },
-  { label: "Cena malejąco", value: "price_desc" },
-  { label: "Najnowsze", value: "newest" },
-  { label: "Nazwa A-Z", value: "title_asc" },
-  { label: "Nazwa Z-A", value: "title_desc" },
-  { label: "Kategorie", value: "category" },
-];
 
 export default function CatalogControls({
   stores = [],
@@ -55,103 +39,32 @@ export default function CatalogControls({
   const router = useRouter();
   const pathname = usePathname();
   const searchParams = useSearchParams();
-
   const [mobileOpen, setMobileOpen] = useState(false);
   const [showAllCategories, setShowAllCategories] = useState(false);
   const [searchValue, setSearchValue] = useState(searchParams.get("search") ?? "");
-  const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-
-  // ITAD search state
-  const [itadLoading, setItadLoading] = useState(false);
   const [itadError, setItadError] = useState<string | null>(null);
   const [itadConfigError, setItadConfigError] = useState(false);
   const [itadResult, setItadResult] = useState<ITADSearchSaveResponse | null>(null);
+  const [isSyncPending, startSyncTransition] = useTransition();
+  const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const activeCategory = searchParams.get("category") ?? "";
   const activeStore = searchParams.get("store") ?? "";
-  const activeSort = (searchParams.get("sort") as ProductSort | null) ?? "featured";
-  const activeFiltersCount = [activeCategory, activeStore, searchParams.get("search")]
-    .filter(Boolean)
-    .length;
+  const activeSort =
+    (searchParams.get("sort") as ProductSort | null) ?? "featured";
+  const activeFiltersCount = [
+    activeCategory,
+    activeStore,
+    searchParams.get("search"),
+  ].filter(Boolean).length;
 
   useEffect(() => {
+    // The controlled input mirrors the URL query so back/forward navigation stays in sync.
+    // eslint-disable-next-line react-hooks/set-state-in-effect
     setSearchValue(searchParams.get("search") ?? "");
   }, [searchParams]);
 
-  function navigateWithSearch(value: string) {
-    const params = new URLSearchParams(searchParams.toString());
-    if (value.trim()) {
-      params.set("search", value);
-    } else {
-      params.delete("search");
-    }
-    params.delete("page");
-    const query = params.toString();
-    startTransition(() => {
-      router.push(query ? `${pathname}?${query}` : pathname);
-    });
-  }
-
-  // Debounced search — only for non-ITAD mode
-  useEffect(() => {
-    if (enableItadSearch) return;
-
-    const currentSearch = searchParams.get("search") ?? "";
-    if (searchValue === currentSearch) return;
-
-    debounceRef.current = setTimeout(() => {
-      navigateWithSearch(searchValue);
-    }, 400);
-
-    return () => {
-      if (debounceRef.current) clearTimeout(debounceRef.current);
-    };
-  }, [searchValue, searchParams, pathname, router, enableItadSearch]);
-
-  async function handleItadSubmit(e: React.FormEvent) {
-    e.preventDefault();
-    if (!searchValue.trim()) return;
-
-    setItadLoading(true);
-    setItadError(null);
-    setItadConfigError(false);
-    setItadResult(null);
-
-    try {
-      const data = await searchAndSaveGames(searchValue.trim());
-      setItadResult(data);
-    } catch (err) {
-      const isMissingKey =
-        err instanceof Error &&
-        ((err as Error & { status?: number }).status === 503 ||
-          err.message.includes("ITAD API key missing"));
-      setItadConfigError(isMissingKey);
-      setItadError(
-        isMissingKey
-          ? "Brakuje klucza ITAD_API_KEY w konfiguracji serwera."
-          : err instanceof Error
-            ? err.message
-            : "Błąd wyszukiwania",
-      );
-    } finally {
-      setItadLoading(false);
-      const p = new URLSearchParams(searchParams.toString());
-      const trimmed = searchValue.trim();
-      if (trimmed) {
-        p.set("search", trimmed);
-      } else {
-        p.delete("search");
-      }
-      p.delete("page");
-      const query = p.toString();
-      startTransition(() => {
-        router.push(query ? `${pathname}?${query}` : pathname);
-        router.refresh();
-      });
-    }
-  }
-
-  function updateParams(changes: Record<string, string | null>) {
+  function buildUrl(changes: Record<string, string | null>) {
     const params = new URLSearchParams(searchParams.toString());
     for (const [key, value] of Object.entries(changes)) {
       if (value && value.trim()) {
@@ -162,82 +75,137 @@ export default function CatalogControls({
     }
     params.delete("page");
     const query = params.toString();
+    return query ? `${pathname}?${query}` : pathname;
+  }
+
+  const applySearchNavigation = useEffectEvent((value: string) => {
+    const nextUrl = buildUrl({ search: value.trim() || null });
     startTransition(() => {
-      router.push(query ? `${pathname}?${query}` : pathname);
+      router.replace(nextUrl, { scroll: false });
+    });
+  });
+
+  useEffect(() => {
+    const currentSearch = searchParams.get("search") ?? "";
+    if (searchValue === currentSearch) return;
+
+    if (debounceRef.current) {
+      clearTimeout(debounceRef.current);
+    }
+
+    debounceRef.current = setTimeout(() => {
+      applySearchNavigation(searchValue);
+    }, 400);
+
+    return () => {
+      if (debounceRef.current) {
+        clearTimeout(debounceRef.current);
+      }
+    };
+  }, [searchValue, searchParams]);
+
+  function updateParams(changes: Record<string, string | null>) {
+    const nextUrl = buildUrl(changes);
+    startTransition(() => {
+      router.replace(nextUrl, { scroll: false });
     });
   }
 
   function resetFilters() {
     setSearchValue("");
+    setItadError(null);
+    setItadConfigError(false);
+    setItadResult(null);
     startTransition(() => {
-      router.push(pathname);
+      router.replace(pathname, { scroll: false });
     });
   }
 
-  const visibleCategories = showAllCategories
-    ? categories
-    : categories.slice(0, INITIAL_VISIBLE);
-  const hasMore = categories.length > INITIAL_VISIBLE;
+  async function handleSync() {
+    const trimmedSearch = searchValue.trim();
+    if (!trimmedSearch) return;
+
+    if (debounceRef.current) {
+      clearTimeout(debounceRef.current);
+    }
+
+    setItadError(null);
+    setItadConfigError(false);
+    setItadResult(null);
+
+    startSyncTransition(async () => {
+      const result = await syncGamesAction(trimmedSearch);
+
+      if (!result.ok) {
+        setItadError(result.error ?? "Nie udało się pobrać wyników z ITAD.");
+        setItadConfigError(Boolean(result.isConfigError));
+        return;
+      }
+
+      setItadResult(result.data ?? null);
+
+      const currentSearch = searchParams.get("search") ?? "";
+      const nextUrl = buildUrl({ search: trimmedSearch });
+
+      startTransition(() => {
+        if (currentSearch !== trimmedSearch) {
+          router.replace(nextUrl, { scroll: false });
+        } else {
+          router.refresh();
+        }
+      });
+    });
+  }
 
   return (
     <>
-      {/* Search bar — always visible */}
       <section className="section-card p-5 md:p-6">
-        {enableItadSearch ? (
-          <form onSubmit={handleItadSubmit} className="flex flex-col gap-3 lg:flex-row">
-            <label className="flex h-14 flex-1 items-center gap-3 rounded-[24px] border border-border bg-bg-card px-5 shadow-[var(--shadow-card)]">
-              <Search className="h-5 w-5 shrink-0 text-text-muted" />
-              <input
-                type="text"
-                placeholder="Wyszukaj grę po tytule (np. Cyberpunk, Witcher)..."
-                value={searchValue}
-                onChange={(event) => setSearchValue(event.target.value)}
-                className="w-full bg-transparent text-base text-text-primary outline-none placeholder:text-text-muted"
-              />
-            </label>
-            <button
-              type="submit"
-              disabled={itadLoading || !searchValue.trim()}
-              className="inline-flex h-14 items-center justify-center gap-2 rounded-[24px] border border-accent bg-accent px-8 text-sm font-semibold text-white disabled:cursor-not-allowed disabled:opacity-50"
-            >
-              {itadLoading ? (
-                <Loader2 className="h-4 w-4 animate-spin" />
-              ) : (
-                <Search className="h-4 w-4" />
-              )}
-              Szukaj
-            </button>
-            {/* Mobile filter trigger */}
-            <button
-              type="button"
-              onClick={() => setMobileOpen(true)}
-              className="inline-flex h-14 items-center justify-center gap-2 rounded-[24px] border border-border bg-bg-card px-5 text-sm font-semibold text-text-primary shadow-[var(--shadow-card)] lg:hidden"
-            >
-              <Filter className="h-4 w-4" />
-              Filtry
-              {activeFiltersCount > 0 && (
-                <span className="inline-flex h-6 min-w-6 items-center justify-center rounded-full bg-accent px-2 text-xs text-white">
-                  {activeFiltersCount}
-                </span>
-              )}
-            </button>
-          </form>
-        ) : (
+        <div className="flex flex-col gap-3">
           <div className="flex flex-col gap-3 lg:flex-row">
-            <label className="flex flex-1 items-center gap-3 rounded-[26px] border border-border bg-bg-card px-5 py-4 shadow-[var(--shadow-card)]">
+            <label className="flex min-h-14 flex-1 items-center gap-3 rounded-[24px] border border-border bg-bg-card px-5 shadow-[var(--shadow-card)]">
+              <span className="sr-only">
+                {enableItadSearch
+                  ? "Filtruj katalog gier po tytule"
+                  : "Filtruj katalog po nazwie produktu"}
+              </span>
               <Search className="h-5 w-5 shrink-0 text-text-muted" />
               <input
                 type="search"
-                placeholder="Szukaj sprzętu, gier, akcesoriów i konkretnych modeli"
+                aria-label={
+                  enableItadSearch
+                    ? "Filtruj katalog gier po tytule"
+                    : "Filtruj katalog po nazwie produktu"
+                }
+                placeholder={
+                  enableItadSearch
+                    ? "Filtruj gry po tytule (np. Baldur, Cyberpunk, Witcher)"
+                    : "Szukaj sprzętu, gier, akcesoriów i konkretnych modeli"
+                }
                 value={searchValue}
                 onChange={(event) => setSearchValue(event.target.value)}
-                className="w-full bg-transparent text-base text-text-primary outline-none placeholder:text-text-muted"
+                className="w-full bg-transparent py-4 text-base text-text-primary outline-none placeholder:text-text-muted"
               />
             </label>
 
-            {/* Mobile filter trigger */}
+            {enableItadSearch && (
+              <button
+                type="button"
+                onClick={handleSync}
+                disabled={isSyncPending || !searchValue.trim()}
+                className="inline-flex h-14 items-center justify-center gap-2 rounded-[24px] border border-accent bg-accent px-6 text-sm font-semibold text-white disabled:cursor-not-allowed disabled:opacity-50"
+              >
+                {isSyncPending ? (
+                  <Loader2 className="h-4 w-4 animate-spin" />
+                ) : (
+                  <Search className="h-4 w-4" />
+                )}
+                Importuj z ITAD
+              </button>
+            )}
+
             <button
               type="button"
+              aria-label="Otwórz panel filtrów"
               onClick={() => setMobileOpen(true)}
               className="inline-flex h-14 items-center justify-center gap-2 rounded-[24px] border border-border bg-bg-card px-5 text-sm font-semibold text-text-primary shadow-[var(--shadow-card)] lg:hidden"
             >
@@ -250,10 +218,17 @@ export default function CatalogControls({
               )}
             </button>
           </div>
-        )}
+
+          {enableItadSearch && (
+            <p className="text-sm leading-6 text-text-secondary">
+              Wpisywanie w polu powyżej filtruje gry już zapisane w katalogu.
+              Użyj przycisku importu tylko wtedy, gdy chcesz dociągnąć nowe
+              wyniki z IsThereAnyDeal do bazy.
+            </p>
+          )}
+        </div>
       </section>
 
-      {/* ITAD feedback */}
       {enableItadSearch && itadError && (
         <div
           className={`section-subtle flex items-start gap-4 p-5 ${
@@ -277,7 +252,7 @@ export default function CatalogControls({
             <h3 className="text-lg text-text-primary">
               {itadConfigError
                 ? "Moduł wymaga konfiguracji"
-                : "Błąd wyszukiwania"}
+                : "Synchronizacja nie powiodła się"}
             </h3>
             <p className="text-sm leading-6 text-text-secondary">{itadError}</p>
           </div>
@@ -292,7 +267,12 @@ export default function CatalogControls({
           <div className="space-y-1">
             <h3 className="text-lg text-text-primary">
               Znaleziono {itadResult.games_found}{" "}
-              {polishPlural(itadResult.games_found, "wynik", "wyniki", "wyników")}
+              {polishPlural(
+                itadResult.games_found,
+                "wynik",
+                "wyniki",
+                "wyników",
+              )}
             </h3>
             <p className="text-sm leading-6 text-text-secondary">
               Zapisano do bazy: {itadResult.products_created} nowych,{" "}
@@ -306,19 +286,27 @@ export default function CatalogControls({
         </div>
       )}
 
-      {/* Mobile filter drawer */}
       {mobileOpen && (
         <div className="fixed inset-0 z-50 bg-text-primary/20 backdrop-blur-sm lg:hidden">
-          <div className="absolute inset-x-3 bottom-3 top-20 overflow-y-auto rounded-[30px] border border-border bg-bg-secondary p-5 shadow-[var(--shadow-float)]">
+          <div
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="catalog-filters-title"
+            className="absolute inset-x-3 bottom-3 top-20 overflow-y-auto rounded-[30px] border border-border bg-bg-secondary p-5 shadow-[var(--shadow-float)]"
+          >
             <div className="mb-5 flex items-center justify-between">
               <div>
                 <p className="eyebrow">Sterowanie katalogiem</p>
-                <h2 className="mt-2 text-2xl text-text-primary">
+                <h2
+                  id="catalog-filters-title"
+                  className="mt-2 text-2xl text-text-primary"
+                >
                   Filtry i sortowanie
                 </h2>
               </div>
               <button
                 type="button"
+                aria-label="Zamknij panel filtrów"
                 onClick={() => setMobileOpen(false)}
                 className="inline-flex h-10 w-10 items-center justify-center rounded-full border border-border bg-bg-card text-text-primary"
               >
@@ -326,158 +314,22 @@ export default function CatalogControls({
               </button>
             </div>
 
-            {/* Mobile filter body */}
-            <div className="flex flex-col gap-5">
-              {/* Categories */}
-              {showCategories && (
-                <div className="flex flex-col gap-2.5">
-                  <span className="eyebrow">
-                    <Sparkles className="h-3.5 w-3.5" />
-                    Kategorie
-                  </span>
-                  <div className="flex flex-col gap-0.5">
-                    <button
-                      type="button"
-                      onClick={() => updateParams({ category: null })}
-                      className={`flex items-center gap-2.5 rounded-xl px-3 py-2 text-left text-sm transition-colors ${
-                        !activeCategory
-                          ? "bg-accent/10 font-semibold text-accent"
-                          : "text-text-secondary hover:bg-bg-tertiary/50 hover:text-text-primary"
-                      }`}
-                    >
-                      <Tag
-                        className={`h-3.5 w-3.5 ${!activeCategory ? "text-accent" : "text-text-muted"}`}
-                      />
-                      Wszystkie
-                    </button>
-                    {visibleCategories.map((cat) => {
-                      const isActive = activeCategory === cat;
-                      return (
-                        <button
-                          key={cat}
-                          type="button"
-                          onClick={() => updateParams({ category: cat })}
-                          className={`flex items-center gap-2.5 rounded-xl px-3 py-2 text-left text-sm transition-colors ${
-                            isActive
-                              ? "bg-accent/10 font-semibold text-accent"
-                              : "text-text-secondary hover:bg-bg-tertiary/50 hover:text-text-primary"
-                          }`}
-                        >
-                          <Tag
-                            className={`h-3.5 w-3.5 ${isActive ? "text-accent" : "text-text-muted"}`}
-                          />
-                          {humanizeCategory(cat)}
-                        </button>
-                      );
-                    })}
-                    {hasMore && (
-                      <button
-                        type="button"
-                        onClick={() => setShowAllCategories((prev) => !prev)}
-                        className="mt-1 flex items-center gap-1.5 px-3 text-xs font-semibold text-accent hover:text-accent/80"
-                      >
-                        <ChevronDown
-                          className={`h-3.5 w-3.5 transition-transform ${showAllCategories ? "rotate-180" : ""}`}
-                        />
-                        {showAllCategories
-                          ? "Zwiń"
-                          : `Pokaż więcej (${categories.length - INITIAL_VISIBLE})`}
-                      </button>
-                    )}
-                  </div>
-                </div>
-              )}
-
-              {/* Stores */}
-              {stores.length > 0 && (
-                <div className="flex flex-col gap-2.5">
-                  <span className="eyebrow">
-                    <StoreIcon className="h-3.5 w-3.5" />
-                    Sklep
-                  </span>
-                  <div className="flex flex-col gap-0.5">
-                    <button
-                      type="button"
-                      onClick={() => updateParams({ store: null })}
-                      className={`flex items-center gap-2.5 rounded-xl px-3 py-2 text-left text-sm transition-colors ${
-                        !activeStore
-                          ? "bg-accent-blue/10 font-semibold text-accent-blue"
-                          : "text-text-secondary hover:bg-bg-tertiary/50 hover:text-text-primary"
-                      }`}
-                    >
-                      <div
-                        className={`h-3.5 w-3.5 rounded border ${
-                          !activeStore
-                            ? "border-accent-blue bg-accent-blue"
-                            : "border-text-muted"
-                        }`}
-                      />
-                      Wszystkie
-                    </button>
-                    {stores.map((s) => {
-                      const isChecked = activeStore === s.slug;
-                      return (
-                        <button
-                          key={s.slug}
-                          type="button"
-                          onClick={() =>
-                            updateParams({ store: isChecked ? null : s.slug })
-                          }
-                          className={`flex items-center gap-2.5 rounded-xl px-3 py-2 text-left text-sm transition-colors ${
-                            isChecked
-                              ? "bg-accent-blue/10 font-semibold text-accent-blue"
-                              : "text-text-secondary hover:bg-bg-tertiary/50 hover:text-text-primary"
-                          }`}
-                        >
-                          <div
-                            className={`h-3.5 w-3.5 rounded border ${
-                              isChecked
-                                ? "border-accent-blue bg-accent-blue"
-                                : "border-text-muted"
-                            }`}
-                          />
-                          {s.name}
-                        </button>
-                      );
-                    })}
-                  </div>
-                </div>
-              )}
-
-              {/* Sort */}
-              <div className="flex flex-col gap-2.5">
-                <span className="eyebrow">
-                  <SlidersHorizontal className="h-3.5 w-3.5" />
-                  Sortowanie
-                </span>
-                <select
-                  value={activeSort}
-                  onChange={(e) =>
-                    updateParams({ sort: e.target.value || null })
-                  }
-                  className="h-10 rounded-xl border border-border bg-bg-card px-3 text-sm text-text-primary outline-none focus:border-accent"
-                >
-                  {sortOptions.map((opt) => (
-                    <option key={opt.value} value={opt.value}>
-                      {opt.label}
-                    </option>
-                  ))}
-                </select>
-              </div>
-
-              {/* Reset */}
-              <button
-                type="button"
-                onClick={() => {
-                  resetFilters();
-                  setMobileOpen(false);
-                }}
-                className="flex h-10 items-center justify-center gap-2 rounded-xl border border-border bg-bg-card text-sm font-semibold text-text-secondary hover:text-text-primary"
-              >
-                <RotateCcw className="h-3.5 w-3.5" />
-                Wyczyść filtry
-              </button>
-            </div>
+            <CatalogFiltersContent
+              stores={stores}
+              categories={categories}
+              showCategories={showCategories}
+              activeCategory={activeCategory}
+              activeStore={activeStore}
+              activeSort={activeSort}
+              showAllCategories={showAllCategories}
+              showResetButton
+              onToggleAllCategories={() =>
+                setShowAllCategories((currentValue) => !currentValue)
+              }
+              onUpdateParams={updateParams}
+              onResetFilters={resetFilters}
+              onAfterChange={() => setMobileOpen(false)}
+            />
           </div>
         </div>
       )}

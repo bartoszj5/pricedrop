@@ -5,12 +5,13 @@ import Sidebar from "../components/Sidebar";
 import ProductCard from "../components/ProductCard";
 import Pagination from "../components/Pagination";
 import EmptyState from "../components/EmptyState";
-import { polishPlural } from "../lib/utils";
-import type { ProductSort, ProductWithBestPrice } from "../types";
+import type { ProductSort } from "../types";
 
 export const metadata: Metadata = {
   title: "Gry — PriceDrop",
 };
+
+export const dynamic = "force-dynamic";
 
 interface PageProps {
   searchParams: Promise<{ [key: string]: string | string[] | undefined }>;
@@ -39,32 +40,8 @@ export default async function GamesPage({ searchParams }: PageProps) {
   ]);
 
   const items = productsData.items;
-  const activeOffers = items.filter(
-    (p) => p.best_price != null && p.best_price > 0,
-  );
-  const trackedOnly = items.filter(
-    (p) => p.best_price == null || p.best_price === 0,
-  );
-
-  const featured: ProductWithBestPrice | null = activeOffers.reduce<ProductWithBestPrice | null>(
-    (best, p) => {
-      if (p.best_price == null) return best;
-      if (!best || (best.best_price != null && p.best_price < best.best_price))
-        return p;
-      return best;
-    },
-    null,
-  );
-
-  const activeStoreName = store
-    ? storesData.items.find((s) => s.slug === store)?.name ?? store
-    : null;
-
-  const subtitleParts = [
-    `${productsData.total} ${polishPlural(productsData.total, "gra", "gry", "gier")} w bazie`,
-    activeStoreName ? `sklep: ${activeStoreName}` : null,
-    sort ? `sortowanie: ${sort.replace("_", " ")}` : "tryb: najlepsze okazje",
-  ].filter(Boolean);
+  const activeOffers = items.filter((p) => p.best_price != null);
+  const trackedOnly = items.filter((p) => p.best_price == null);
 
   return (
     <main className="page-shell flex flex-col gap-6">
@@ -87,7 +64,7 @@ export default async function GamesPage({ searchParams }: PageProps) {
           {items.length === 0 ? (
             <EmptyState
               message="Brak gier w bazie"
-              detail="Wyszukaj grę powyżej, a zostanie ona automatycznie dodana do bazy z aktualnymi cenami ze sklepów cyfrowych."
+              detail="Filtrowanie nie znalazło jeszcze zapisanych gier. Użyj przycisku importu z ITAD, jeśli chcesz dociągnąć nowe wyniki do bazy."
             />
           ) : (
             <>

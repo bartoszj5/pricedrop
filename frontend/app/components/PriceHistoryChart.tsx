@@ -51,14 +51,16 @@ export default function PriceHistoryChart({ history }: PriceHistoryChartProps) {
 
   const dataMap = new Map<string, Record<string, number | string>>();
   for (const entry of sorted) {
-    const date = new Date(entry.recorded_at).toLocaleDateString("pl-PL", {
+    const recordedDate = new Date(entry.recorded_at);
+    const dateKey = entry.recorded_at.slice(0, 10);
+    const dateLabel = recordedDate.toLocaleDateString("pl-PL", {
       day: "2-digit",
       month: "2-digit",
     });
-    if (!dataMap.has(date)) {
-      dataMap.set(date, { date });
+    if (!dataMap.has(dateKey)) {
+      dataMap.set(dateKey, { date: dateLabel, label: dateKey });
     }
-    const point = dataMap.get(date)!;
+    const point = dataMap.get(dateKey)!;
     point[entry.store_name] = Number(entry.new_price);
   }
 
@@ -84,6 +86,15 @@ export default function PriceHistoryChart({ history }: PriceHistoryChartProps) {
             border: "1px solid #dacdb7",
             borderRadius: "16px",
             fontSize: "13px",
+          }}
+          labelFormatter={(_, payload) => {
+            const label = payload?.[0]?.payload?.label;
+            if (typeof label !== "string") return "";
+            return new Date(label).toLocaleDateString("pl-PL", {
+              day: "2-digit",
+              month: "2-digit",
+              year: "numeric",
+            });
           }}
           labelStyle={{ color: "#556072" }}
           formatter={(value) => [`${Number(value).toFixed(2)} zł`]}

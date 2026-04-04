@@ -121,6 +121,7 @@ services:
       - "3000:3000"
     environment:
       INTERNAL_API_URL: http://api:8000
+      NODE_ENV: production
     depends_on:
       api:
         condition: service_healthy

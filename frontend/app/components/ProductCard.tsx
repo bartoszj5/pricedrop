@@ -8,7 +8,7 @@ interface ProductCardProps {
 }
 
 export default function ProductCard({ product }: ProductCardProps) {
-  const hasActiveOffer = product.best_price != null && product.best_price > 0;
+  const hasActiveOffer = product.best_price != null;
   const availableOffersCount = product.available_offers_count ?? 0;
 
   return (

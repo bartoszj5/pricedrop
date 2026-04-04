@@ -3,11 +3,13 @@ import { ArrowUpRight, CheckCircle2, Globe, RadioTower, XCircle } from "lucide-r
 import { getStores } from "../lib/api";
 import EmptyState from "../components/EmptyState";
 import type { Metadata } from "next";
-import { getDomainLabel } from "../lib/utils";
+import { getStoreSourceLabel, isGenericStoreUrl } from "../lib/utils";
 
 export const metadata: Metadata = {
   title: "Sklepy — PriceDrop",
 };
+
+export const dynamic = "force-dynamic";
 
 export default async function StoresPage() {
   const data = await getStores({ page_size: 100 });
@@ -65,7 +67,7 @@ export default async function StoresPage() {
                     {store.name}
                   </h3>
                   <p className="mt-2 text-sm text-text-secondary">
-                    {getDomainLabel(store.url)}
+                    {getStoreSourceLabel(store.url)}
                   </p>
                 </div>
 
@@ -84,7 +86,7 @@ export default async function StoresPage() {
                     </p>
                     <div className="mt-2 inline-flex items-center gap-2 text-sm font-semibold text-text-primary">
                       <Globe className="h-4 w-4 text-accent-blue" />
-                      Sklep online
+                      {isGenericStoreUrl(store.url) ? "Import z ITAD" : "Sklep online"}
                     </div>
                   </div>
                 </div>

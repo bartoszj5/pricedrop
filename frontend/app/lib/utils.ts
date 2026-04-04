@@ -1,10 +1,14 @@
 export function formatPrice(price: number, currency = "PLN"): string {
-  return price.toLocaleString("pl-PL", {
+  if (!Number.isFinite(price)) {
+    return "Brak ceny";
+  }
+
+  return new Intl.NumberFormat("pl-PL", {
     style: "currency",
     currency,
     minimumFractionDigits: 2,
     maximumFractionDigits: 2,
-  });
+  }).format(price);
 }
 
 export function formatDate(iso: string): string {
@@ -19,11 +23,19 @@ export function timeAgo(iso: string): string {
   const diff = Date.now() - new Date(iso).getTime();
   const minutes = Math.floor(diff / 60000);
   if (minutes < 1) return "przed chwilą";
-  if (minutes < 60) return `${minutes} min temu`;
+
+  const relativeTime = new Intl.RelativeTimeFormat("pl-PL", {
+    numeric: "auto",
+  });
+
+  if (minutes < 60) return relativeTime.format(-minutes, "minute");
+
   const hours = Math.floor(minutes / 60);
-  if (hours < 24) return `${hours} godz. temu`;
+  if (hours < 24) return relativeTime.format(-hours, "hour");
+
   const days = Math.floor(hours / 24);
-  if (days < 30) return `${days} dni temu`;
+  if (days < 30) return relativeTime.format(-days, "day");
+
   return formatDate(iso);
 }
 
@@ -33,6 +45,14 @@ export function getDomainLabel(url: string): string {
   } catch {
     return url;
   }
+}
+
+export function isGenericStoreUrl(url: string): boolean {
+  return getDomainLabel(url) === "isthereanydeal.com";
+}
+
+export function getStoreSourceLabel(url: string): string {
+  return isGenericStoreUrl(url) ? "Źródło z ITAD" : getDomainLabel(url);
 }
 
 export function polishPlural(
@@ -64,6 +84,7 @@ const categoryLabels: Record<string, string> = {
   cpu: "Procesor",
   desktop: "Komputer",
   "ebook-reader": "Czytnik e-book",
+  dlc: "Dodatek",
   game: "Gra",
   "game-pc": "Gra PC",
   "game-ps5": "Gra PS5",

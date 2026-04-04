@@ -6,7 +6,8 @@ import ProductCard from "./components/ProductCard";
 import Pagination from "./components/Pagination";
 import EmptyState from "./components/EmptyState";
 import type { ProductSort, ProductWithBestPrice } from "./types";
-import { humanizeCategory } from "./lib/utils";
+
+export const dynamic = "force-dynamic";
 
 interface PageProps {
   searchParams: Promise<{ [key: string]: string | string[] | undefined }>;
@@ -33,29 +34,15 @@ export default async function Home({ searchParams }: PageProps) {
   ]);
 
   const items = productsData.items;
-  const activeOffers = items.filter((product) => product.best_price != null && product.best_price > 0);
-  const trackedOnly = items.filter((product) => product.best_price == null || product.best_price === 0);
+  const activeOffers = items.filter((product) => product.best_price != null);
+  const trackedOnly = items.filter((product) => product.best_price == null);
   const featuredPool = activeOffers;
   const featured: ProductWithBestPrice | null =
     featuredPool.reduce<ProductWithBestPrice | null>((best, p) => {
       if (p.best_price == null) return best;
-      if (!best || (best.best_price != null && p.best_price < best.best_price)) return p;
+      if (!best || best.best_price == null || p.best_price < best.best_price) return p;
       return best;
     }, null);
-
-  const activeStoreName = store
-    ? storesData.items.find((entry) => entry.slug === store)?.name ?? store
-    : null;
-  const title = search
-    ? `Wyniki dla "${search}"`
-    : category
-      ? `Kategoria: ${humanizeCategory(category)}`
-      : "Katalog okazji i monitoringu";
-  const subtitleParts = [
-    `${productsData.total} produktów`,
-    activeStoreName ? `aktywny sklep: ${activeStoreName}` : null,
-    sort ? `sortowanie: ${sort.replace("_", " ")}` : "tryb: najlepsze okazje",
-  ].filter(Boolean);
 
   return (
     <main className="page-shell flex flex-col gap-6">

@@ -1,11 +1,11 @@
 from datetime import datetime, timezone
 from decimal import Decimal
 from math import ceil
-from typing import Annotated
+from typing import Annotated, Literal
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Response, status
 from pydantic import ConfigDict, field_validator
-from sqlalchemy import func
+from sqlalchemy import case, func, or_
 from sqlmodel import SQLModel, Session, delete, select
 
 from shared.database import get_session
@@ -72,7 +72,11 @@ class PriceDetailRead(PriceRead):
 
 class PriceListResponse(SQLModel):
     items: list[PriceDetailRead]
+    availability: Literal["active", "inactive", "all"]
     total: int
+    all_total: int
+    active_total: int
+    inactive_total: int
     page: int
     page_size: int
     total_pages: int
@@ -127,6 +131,7 @@ def list_prices(
     session: SessionDep,
     product_slug: Annotated[str | None, Query(max_length=255)] = None,
     store_slug: Annotated[str | None, Query(max_length=255)] = None,
+    availability: Literal["active", "inactive", "all"] = "all",
     page: Annotated[int, Query(ge=1)] = 1,
     page_size: Annotated[int, Query(ge=1, le=100)] = 20,
 ) -> PriceListResponse:
@@ -140,6 +145,46 @@ def list_prices(
         base_statement = base_statement.where(Product.slug == product_slug)
     if store_slug:
         base_statement = base_statement.where(Store.slug == store_slug)
+
+    summary_statement = (
+        select(
+            func.count().label("all_total"),
+            func.coalesce(
+                func.sum(
+                    case(
+                        (
+                            (Price.is_available == True)
+                            & Price.current_price.is_not(None),
+                            1,
+                        ),
+                        else_=0,
+                    )
+                ),
+                0,
+            ).label("active_total"),
+        )
+        .select_from(Price)
+        .join(Product, Price.product_id == Product.id)
+        .join(Store, Price.store_id == Store.id)
+    )
+
+    if product_slug:
+        summary_statement = summary_statement.where(Product.slug == product_slug)
+    if store_slug:
+        summary_statement = summary_statement.where(Store.slug == store_slug)
+
+    all_total, active_total = session.exec(summary_statement).one()
+    inactive_total = all_total - active_total
+
+    if availability == "active":
+        base_statement = base_statement.where(
+            Price.is_available == True,
+            Price.current_price.is_not(None),
+        )
+    elif availability == "inactive":
+        base_statement = base_statement.where(
+            or_(Price.is_available == False, Price.current_price.is_(None))
+        )
 
     total_subquery = base_statement.with_only_columns(Price.id).subquery()
     total = session.exec(select(func.count()).select_from(total_subquery)).one()
@@ -173,7 +218,11 @@ def list_prices(
 
     return PriceListResponse(
         items=items,
+        availability=availability,
         total=total,
+        all_total=all_total,
+        active_total=active_total,
+        inactive_total=inactive_total,
         page=page,
         page_size=page_size,
         total_pages=ceil(total / page_size) if total else 0,

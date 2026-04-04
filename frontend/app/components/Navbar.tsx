@@ -1,6 +1,6 @@
 "use client";
 
-import { ArrowUpRight, ChartColumnIncreasing } from "lucide-react";
+import { ChartColumnIncreasing } from "lucide-react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 

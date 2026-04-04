@@ -82,7 +82,10 @@ class ProductListResponse(SQLModel):
 
 class ProductDetailResponse(SQLModel):
     product: ProductRead
-    prices: list[ProductStorePriceRead]
+    store_prices: list[ProductStorePriceRead]
+    active_offers_count: int
+    tracked_stores_count: int
+    inactive_offers_count: int
 
 
 class ProductWithBestPriceRead(SQLModel):
@@ -177,8 +180,6 @@ def _apply_product_filters(
             .where(
                 Price.product_id == Product.id,
                 Store.slug == normalized_store,
-                Price.is_available == True,
-                Price.current_price.is_not(None),
             )
             .exists()
         )
@@ -395,14 +396,10 @@ def get_product_details(slug: str, session: SessionDep) -> ProductDetailResponse
             Price,
             (Price.store_id == Store.id) & (Price.product_id == product.id),
         )
-        .where(
-            Price.current_price.is_not(None),
-            Price.is_available == True,
-        )
-        .order_by(Price.current_price.asc(), Store.name.asc())
+        .order_by(Store.name.asc())
     ).all()
 
-    prices = [
+    store_prices = [
         ProductStorePriceRead(
             price_id=price.id,
             store_id=store.id,
@@ -419,9 +416,18 @@ def get_product_details(slug: str, session: SessionDep) -> ProductDetailResponse
         for store, price in rows
     ]
 
+    active_offers_count = sum(
+        1 for price in store_prices if price.is_available and price.current_price is not None
+    )
+    tracked_stores_count = len(store_prices)
+    inactive_offers_count = tracked_stores_count - active_offers_count
+
     return ProductDetailResponse(
         product=ProductRead.model_validate(product),
-        prices=prices,
+        store_prices=store_prices,
+        active_offers_count=active_offers_count,
+        tracked_stores_count=tracked_stores_count,
+        inactive_offers_count=inactive_offers_count,
     )
 
 
