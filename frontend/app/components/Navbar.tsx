@@ -6,7 +6,9 @@ import { usePathname } from "next/navigation";
 
 const navLinks = [
   { label: "Okazje", href: "/" },
-  { label: "Sklepy", href: "/stores" },
+  ...(process.env.NODE_ENV !== "production"
+    ? [{ label: "Sklepy" as const, href: "/stores" as const }]
+    : []),
   { label: "Gry", href: "/search" },
 ];
 
@@ -24,9 +26,6 @@ export default function Navbar() {
             <div className="flex flex-col">
               <span className="font-display text-[1.7rem] leading-none text-text-primary">
                 PriceDrop
-              </span>
-              <span className="text-[0.76rem] font-semibold uppercase tracking-[0.24em] text-text-muted">
-                Editorial market board
               </span>
             </div>
           </Link>
