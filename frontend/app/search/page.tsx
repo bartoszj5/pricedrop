@@ -1,5 +1,11 @@
 import type { Metadata } from "next";
+import { Suspense } from "react";
 import { getProducts, getStores } from "../lib/api";
+import {
+  CatalogControlsFallback,
+  PaginationFallback,
+  SidebarFallback,
+} from "../components/CatalogChromeFallback";
 import CatalogControls from "../components/CatalogControls";
 import Sidebar from "../components/Sidebar";
 import ProductCard from "../components/ProductCard";
@@ -49,19 +55,23 @@ export default async function GamesPage({ searchParams }: PageProps) {
   return (
     <main className="page-shell flex flex-col gap-6">
       {/* Wyniki od razu z bazy; uzupełnianie katalogu w tle — patrz CatalogControls */}
-      <CatalogControls
-        stores={storesData.items}
-        categories={productsData.categories ?? []}
-        showCategories={false}
-        enableItadSearch
-      />
-
-      <div className="flex gap-6">
-        <Sidebar
+      <Suspense fallback={<CatalogControlsFallback />}>
+        <CatalogControls
           stores={storesData.items}
           categories={productsData.categories ?? []}
           showCategories={false}
+          enableItadSearch
         />
+      </Suspense>
+
+      <div className="flex gap-6">
+        <Suspense fallback={<SidebarFallback />}>
+          <Sidebar
+            stores={storesData.items}
+            categories={productsData.categories ?? []}
+            showCategories={false}
+          />
+        </Suspense>
 
         <div className="flex min-w-0 flex-1 flex-col gap-6">
           {items.length === 0 ? (
@@ -127,7 +137,9 @@ export default async function GamesPage({ searchParams }: PageProps) {
             </>
           )}
 
-          <Pagination page={page} totalPages={productsData.total_pages} />
+          <Suspense fallback={<PaginationFallback />}>
+            <Pagination page={page} totalPages={productsData.total_pages} />
+          </Suspense>
         </div>
       </div>
     </main>

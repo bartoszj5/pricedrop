@@ -3,6 +3,7 @@
 import { AlertTriangle, RotateCcw } from "lucide-react";
 
 export default function Error({
+  error,
   reset,
 }: {
   error: Error & { digest?: string };
@@ -20,6 +21,11 @@ export default function Error({
             Nie udało się wczytać tej części aplikacji. Spróbuj ponownie za
             chwilę albo wróć do poprzedniego widoku.
           </p>
+          {error.digest ? (
+            <p className="mt-4 font-mono text-xs text-text-muted">
+              Identyfikator: {error.digest}
+            </p>
+          ) : null}
         </div>
         <button
           onClick={reset}

@@ -2,6 +2,7 @@ import type { Metadata } from "next";
 import { Fraunces, Manrope } from "next/font/google";
 import { Suspense } from "react";
 import Navbar from "./components/Navbar";
+import { SkeletonBox } from "./components/Skeleton";
 import "./globals.css";
 
 const displayFont = Fraunces({
@@ -33,7 +34,15 @@ export default function RootLayout({
       <html lang="pl" data-scroll-behavior="smooth">
       <body className={`${displayFont.variable} ${bodyFont.variable} antialiased`}>
         <div className="flex min-h-screen flex-col">
-          <Suspense>
+          <Suspense
+            fallback={
+              <header className="sticky top-0 z-40 border-b border-border/80 bg-bg-secondary/85 backdrop-blur-xl">
+                <div className="mx-auto flex min-h-[76px] w-[min(1380px,calc(100vw-32px))] items-center py-4">
+                  <SkeletonBox className="h-12 w-52 rounded-[18px]" />
+                </div>
+              </header>
+            }
+          >
             <Navbar />
           </Suspense>
           <div className="flex-1">{children}</div>

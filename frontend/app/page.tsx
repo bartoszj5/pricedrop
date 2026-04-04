@@ -1,5 +1,11 @@
+import { Suspense } from "react";
 import { getProducts, getStores } from "./lib/api";
 import CatalogControls from "./components/CatalogControls";
+import {
+  CatalogControlsFallback,
+  PaginationFallback,
+  SidebarFallback,
+} from "./components/CatalogChromeFallback";
 import Sidebar from "./components/Sidebar";
 import FeaturedBanner from "./components/FeaturedBanner";
 import ProductCard from "./components/ProductCard";
@@ -50,16 +56,20 @@ export default async function Home({ searchParams }: PageProps) {
 
   return (
     <main className="page-shell flex flex-col gap-6">
-      <CatalogControls
-        stores={storesData.items}
-        categories={categories}
-      />
-
-      <div className="flex gap-6">
-        <Sidebar
+      <Suspense fallback={<CatalogControlsFallback />}>
+        <CatalogControls
           stores={storesData.items}
           categories={categories}
         />
+      </Suspense>
+
+      <div className="flex gap-6">
+        <Suspense fallback={<SidebarFallback />}>
+          <Sidebar
+            stores={storesData.items}
+            categories={categories}
+          />
+        </Suspense>
 
         <div className="flex min-w-0 flex-1 flex-col gap-6">
           {page === 1 && (
@@ -125,7 +135,9 @@ export default async function Home({ searchParams }: PageProps) {
             </>
           )}
 
-          <Pagination page={page} totalPages={productsData.total_pages} />
+          <Suspense fallback={<PaginationFallback />}>
+            <Pagination page={page} totalPages={productsData.total_pages} />
+          </Suspense>
         </div>
       </div>
     </main>

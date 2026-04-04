@@ -66,7 +66,6 @@ export default function CatalogControls({
 
   useEffect(() => {
     // The controlled input mirrors the URL query so back/forward navigation stays in sync.
-    // eslint-disable-next-line react-hooks/set-state-in-effect
     setSearchValue(searchParams.get("search") ?? "");
   }, [searchParams]);
 
@@ -115,8 +114,13 @@ export default function CatalogControls({
     };
   }, [enableItadSearch, trimmedUrlSearch, router]);
 
+  const searchParamsRef = useRef(searchParams);
+  const pathnameRef = useRef(pathname);
+  searchParamsRef.current = searchParams;
+  pathnameRef.current = pathname;
+
   function buildUrl(changes: Record<string, string | null>) {
-    const params = new URLSearchParams(searchParams.toString());
+    const params = new URLSearchParams(searchParamsRef.current.toString());
     for (const [key, value] of Object.entries(changes)) {
       if (value && value.trim()) {
         params.set(key, value);
@@ -126,7 +130,8 @@ export default function CatalogControls({
     }
     params.delete("page");
     const query = params.toString();
-    return query ? `${pathname}?${query}` : pathname;
+    const path = pathnameRef.current;
+    return query ? `${path}?${query}` : path;
   }
 
   const applySearchNavigation = useEffectEvent((value: string) => {
@@ -136,9 +141,10 @@ export default function CatalogControls({
     });
   });
 
+  const readSearchFromUrl = useEffectEvent(() => searchParams.get("search") ?? "");
+
   useEffect(() => {
-    const currentSearch = searchParams.get("search") ?? "";
-    if (searchValue === currentSearch) return;
+    if (searchValue === readSearchFromUrl()) return;
 
     if (debounceRef.current) {
       clearTimeout(debounceRef.current);
@@ -153,7 +159,7 @@ export default function CatalogControls({
         clearTimeout(debounceRef.current);
       }
     };
-  }, [searchValue, searchParams]);
+  }, [searchValue]);
 
   function updateParams(changes: Record<string, string | null>) {
     const nextUrl = buildUrl(changes);

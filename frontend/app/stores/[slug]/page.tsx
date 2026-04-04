@@ -8,6 +8,10 @@ import {
   Store as StoreIcon,
   XCircle,
 } from "lucide-react";
+import { Suspense } from "react";
+import {
+  PaginationFallback,
+} from "../../components/CatalogChromeFallback";
 import Pagination from "../../components/Pagination";
 import EmptyState from "../../components/EmptyState";
 import { ApiError, getPrices, getStore } from "../../lib/api";
@@ -304,7 +308,9 @@ export default async function StoreDetailPage({
               })}
             </div>
 
-            <Pagination page={page} totalPages={pricesData.total_pages} />
+            <Suspense fallback={<PaginationFallback />}>
+              <Pagination page={page} totalPages={pricesData.total_pages} />
+            </Suspense>
           </>
         ) : (
           <EmptyState

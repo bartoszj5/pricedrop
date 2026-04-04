@@ -1,5 +1,7 @@
+import Image from "next/image";
 import Link from "next/link";
 import { ArrowUpRight, Radar, Store as StoreIcon, Tag } from "lucide-react";
+import { remoteImageOptions } from "../lib/remoteImage";
 import type { ProductWithBestPrice } from "../types";
 import { formatPrice, humanizeCategory } from "../lib/utils";
 
@@ -18,10 +20,13 @@ export default function ProductCard({ product }: ProductCardProps) {
     >
       <div className="relative aspect-[4/3] w-full overflow-hidden bg-bg-tertiary">
         {product.image_url ? (
-          <img
+          <Image
             src={product.image_url}
             alt={product.title}
-            className="h-full w-full object-cover transition-transform duration-300 group-hover:scale-[1.03]"
+            fill
+            sizes="(max-width: 768px) 100vw, (max-width: 1200px) 50vw, 33vw"
+            className="object-cover transition-transform duration-300 group-hover:scale-[1.03]"
+            {...remoteImageOptions(product.image_url)}
           />
         ) : (
           <div className="flex h-full w-full items-center justify-center text-sm text-text-muted">
@@ -54,10 +59,13 @@ export default function ProductCard({ product }: ProductCardProps) {
           {product.best_store_name ? (
             <div className="inline-flex w-fit items-center gap-2 rounded-full border border-border bg-bg-secondary px-3 py-1.5 text-xs font-semibold text-text-secondary">
               {product.best_store_logo_url ? (
-                <img
+                <Image
                   src={product.best_store_logo_url}
                   alt={product.best_store_name}
+                  width={16}
+                  height={16}
                   className="h-4 w-4 object-contain"
+                  {...remoteImageOptions(product.best_store_logo_url)}
                 />
               ) : (
                 <StoreIcon className="h-3.5 w-3.5" />

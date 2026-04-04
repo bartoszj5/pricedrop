@@ -1,5 +1,7 @@
 import { ArrowRight, Radar, Sparkles, TrendingDown } from "lucide-react";
+import Image from "next/image";
 import Link from "next/link";
+import { remoteImageOptions } from "../lib/remoteImage";
 import type { ProductWithBestPrice } from "../types";
 import { formatPrice } from "../lib/utils";
 
@@ -102,10 +104,13 @@ export default function FeaturedBanner({
           </div>
           <div className="flex h-14 w-14 items-center justify-center rounded-full border border-border bg-bg-card">
             {product.best_store_logo_url ? (
-              <img
+              <Image
                 src={product.best_store_logo_url}
                 alt={product.best_store_name ?? "Sklep"}
+                width={32}
+                height={32}
                 className="h-8 w-8 object-contain"
+                {...remoteImageOptions(product.best_store_logo_url)}
               />
             ) : (
               <TrendingDown className="h-6 w-6 text-accent" />

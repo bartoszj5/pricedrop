@@ -1,3 +1,4 @@
+import Image from "next/image";
 import { notFound } from "next/navigation";
 import Link from "next/link";
 import {
@@ -10,6 +11,7 @@ import {
   Tag,
 } from "lucide-react";
 import { ApiError, getProductDetail, getProductHistory } from "../../lib/api";
+import { remoteImageOptions } from "../../lib/remoteImage";
 import { formatDate, formatPrice, humanizeCategory, timeAgo } from "../../lib/utils";
 import { isActiveOffer } from "../../lib/normalize";
 import PriceHistoryChartClient from "../../components/PriceHistoryChartClient";
@@ -81,12 +83,16 @@ export default async function ProductDetailPage({ params }: PageProps) {
       </Link>
 
       <section className="section-card grid gap-6 p-6 md:p-8 xl:grid-cols-[0.9fr_1.1fr]">
-        <div className="overflow-hidden rounded-[28px] border border-border bg-bg-tertiary">
+        <div className="relative min-h-[280px] overflow-hidden rounded-[28px] border border-border bg-bg-tertiary">
           {product.image_url ? (
-            <img
+            <Image
               src={product.image_url}
               alt={product.title}
-              className="h-full min-h-[280px] w-full object-cover"
+              fill
+              priority
+              sizes="(max-width: 1280px) 100vw, 540px"
+              className="object-cover"
+              {...remoteImageOptions(product.image_url)}
             />
           ) : (
             <div className="flex min-h-[280px] items-center justify-center text-text-muted">
@@ -186,10 +192,13 @@ export default async function ProductDetailPage({ params }: PageProps) {
                 <div className="flex items-start gap-3">
                   <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-full border border-border bg-bg-card">
                     {price.store_logo_url ? (
-                      <img
+                      <Image
                         src={price.store_logo_url}
                         alt={price.store_name}
+                        width={28}
+                        height={28}
                         className="h-7 w-7 object-contain"
+                        {...remoteImageOptions(price.store_logo_url)}
                       />
                     ) : (
                       <ShoppingBag className="h-5 w-5 text-accent" />
