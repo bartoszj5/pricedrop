@@ -20,6 +20,10 @@ type App struct {
 	running         bool
 	crawlMu         sync.Mutex
 	crawlRunning    bool
+	linkMu          sync.Mutex
+	linkRunning     bool
+	enrichMu        sync.Mutex
+	enrichRunning   bool
 }
 
 func main() {
@@ -58,6 +62,8 @@ func main() {
 	mux.HandleFunc("/scrape/", app.handleScrapeStore)
 	mux.HandleFunc("/crawl", app.handleCrawl)
 	mux.HandleFunc("/crawl/", app.handleCrawlStore)
+	mux.HandleFunc("/link/morele", app.handleLinkMorele)
+	mux.HandleFunc("/enrich/x-kom-manufacturer-code", app.handleEnrichXKOMManufacturer)
 
 	log.Printf("Scraper listening on :%s", cfg.Port)
 	log.Printf("Registered scrapers: %v", registry.RegisteredSlugs())
@@ -180,6 +186,14 @@ func (app *App) scrapeStore(storeSlug string) ScrapeStoreResult {
 			// Still mark as checked so we don't hammer a broken URL.
 			app.db.MarkChecked(p.ID)
 			continue
+		}
+
+		if storeSlug == "x-kom" {
+			if mc := strings.TrimSpace(scraped.ManufacturerCode); mc != "" {
+				if err := app.db.SetProductManufacturerCode(p.ProductID, mc); err != nil {
+					log.Printf("[%s] manufacturer_code for product %d: %v", storeSlug, p.ProductID, err)
+				}
+			}
 		}
 
 		log.Printf("[%s] %s: %.2f %s (was %.2f), available=%v",
@@ -461,6 +475,7 @@ func (app *App) crawlStoreCategory(storeSlug, category, categoryURL string, maxP
 		price := dp.Price
 		currency := dp.Currency
 		imageURL := dp.ImageURL
+		manufacturerCode := ""
 
 		if (title == "" || price == 0) && scraper != nil {
 			scraped, err := scraper.ScrapeProduct(dp.URL)
@@ -481,6 +496,7 @@ func (app *App) crawlStoreCategory(storeSlug, category, categoryURL string, maxP
 			if imageURL == "" {
 				imageURL = scraped.ImageURL
 			}
+			manufacturerCode = scraped.ManufacturerCode
 		}
 
 		if title == "" {
@@ -494,7 +510,7 @@ func (app *App) crawlStoreCategory(storeSlug, category, categoryURL string, maxP
 
 		cleanTitle := cleanProductTitle(title)
 		productSlug := slugify(normalizeTitle(cleanTitle))
-		err = app.db.UpsertProductAndPrice(cleanTitle, productSlug, category, imageURL, store.ID, price, currency, dp.URL)
+		err = app.db.UpsertProductAndPrice(cleanTitle, productSlug, category, imageURL, store.ID, price, currency, dp.URL, manufacturerCode)
 		if err != nil {
 			log.Printf("[crawl/%s] Error upserting %s: %v", storeSlug, title, err)
 			result.Errors++
@@ -515,4 +531,172 @@ func writeJSON(w http.ResponseWriter, status int, v interface{}) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(status)
 	json.NewEncoder(w).Encode(v)
+}
+
+// handleLinkMorele matches DB products (with source store price, without Morele) to Morele via search.
+// POST /link/morele
+// Query: source (default x-kom), limit (default 20, max 500), min_score (default 0.32),
+// max_candidates (default 25), dry_run (default true; pass dry_run=false to write prices),
+// probe (pass probe=true for zero request delay on search + Morele scrape — use only for small tests),
+// category (optional; crawler key e.g. cpu — only products with this products.category).
+func (app *App) handleLinkMorele(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	dryRun := r.URL.Query().Get("dry_run") != "false"
+	probe := r.URL.Query().Get("probe") == "true" || r.URL.Query().Get("probe") == "1"
+
+	limit := 20
+	if v := r.URL.Query().Get("limit"); v != "" {
+		if n, err := strconv.Atoi(v); err == nil && n > 0 {
+			limit = n
+			if limit > 500 {
+				limit = 500
+			}
+		}
+	}
+
+	minScore := 0.32
+	if v := r.URL.Query().Get("min_score"); v != "" {
+		if f, err := strconv.ParseFloat(v, 64); err == nil && f >= 0 && f <= 1 {
+			minScore = f
+		}
+	}
+
+	maxCandidates := 25
+	if v := r.URL.Query().Get("max_candidates"); v != "" {
+		if n, err := strconv.Atoi(v); err == nil && n > 0 {
+			maxCandidates = n
+			if maxCandidates > 60 {
+				maxCandidates = 60
+			}
+		}
+	}
+
+	sourceStore := strings.TrimSpace(r.URL.Query().Get("source"))
+	if sourceStore == "" {
+		sourceStore = "x-kom"
+	}
+
+	category := strings.TrimSpace(r.URL.Query().Get("category"))
+	if len(category) > 50 {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "category too long (max 50)"})
+		return
+	}
+
+	if _, err := app.db.GetStoreBySlug(sourceStore); err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "unknown source store: " + sourceStore})
+		return
+	}
+
+	if !app.tryStartLink() {
+		writeJSON(w, http.StatusConflict, map[string]string{"error": "link job already in progress"})
+		return
+	}
+
+	go func() {
+		defer app.finishLink()
+		sum := app.runLinkMorele(sourceStore, category, limit, minScore, maxCandidates, dryRun, probe)
+		log.Printf("[link/morele] completed: %+v", sum)
+	}()
+
+	resp := map[string]interface{}{
+		"status":    "link morele started",
+		"source":    sourceStore,
+		"limit":     limit,
+		"min_score": minScore,
+		"dry_run":   dryRun,
+		"probe":     probe,
+	}
+	if category != "" {
+		resp["category"] = category
+	}
+	writeJSON(w, http.StatusAccepted, resp)
+}
+
+func (app *App) tryStartLink() bool {
+	app.linkMu.Lock()
+	defer app.linkMu.Unlock()
+	if app.linkRunning {
+		return false
+	}
+	app.linkRunning = true
+	return true
+}
+
+func (app *App) finishLink() {
+	app.linkMu.Lock()
+	defer app.linkMu.Unlock()
+	app.linkRunning = false
+}
+
+// handleEnrichXKOMManufacturer scrapes x-kom product pages and saves manufacturer_code (MPN) on products.
+// POST /enrich/x-kom-manufacturer-code
+// Query: only_missing (default true; only_missing=false re-fetches all selected rows),
+// category (optional), limit (default 500, max 5000), probe (zero delay — small tests only).
+func (app *App) handleEnrichXKOMManufacturer(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	onlyMissing := r.URL.Query().Get("only_missing") != "false"
+
+	limit := 500
+	if v := r.URL.Query().Get("limit"); v != "" {
+		if n, err := strconv.Atoi(v); err == nil && n > 0 {
+			limit = n
+			if limit > 5000 {
+				limit = 5000
+			}
+		}
+	}
+
+	category := strings.TrimSpace(r.URL.Query().Get("category"))
+	if len(category) > 50 {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "category too long (max 50)"})
+		return
+	}
+
+	probe := r.URL.Query().Get("probe") == "true" || r.URL.Query().Get("probe") == "1"
+
+	if !app.tryStartEnrich() {
+		writeJSON(w, http.StatusConflict, map[string]string{"error": "enrich job already in progress"})
+		return
+	}
+
+	go func() {
+		defer app.finishEnrich()
+		sum := app.runEnrichXKOMManufacturer(onlyMissing, category, limit, probe)
+		log.Printf("[enrich/x-kom-mfr] completed: %+v", sum)
+	}()
+
+	resp := map[string]interface{}{
+		"status":       "x-kom manufacturer enrich started",
+		"only_missing": onlyMissing,
+		"limit":        limit,
+		"probe":        probe,
+	}
+	if category != "" {
+		resp["category"] = category
+	}
+	writeJSON(w, http.StatusAccepted, resp)
+}
+
+func (app *App) tryStartEnrich() bool {
+	app.enrichMu.Lock()
+	defer app.enrichMu.Unlock()
+	if app.enrichRunning {
+		return false
+	}
+	app.enrichRunning = true
+	return true
+}
+
+func (app *App) finishEnrich() {
+	app.enrichMu.Lock()
+	defer app.enrichMu.Unlock()
+	app.enrichRunning = false
 }

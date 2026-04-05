@@ -17,6 +17,7 @@ type jsonLDProduct struct {
 	Name      string       `json:"name"`
 	ProductID string       `json:"productID"`
 	SKU       string       `json:"sku"`
+	MPN       string       `json:"mpn"`
 	Image     []string     `json:"image"`
 	Offers    jsonLDOffers `json:"offers"`
 	Brand     *jsonLDBrand `json:"brand"`
@@ -62,6 +63,7 @@ func (s *XKomScraper) ScrapeProduct(url string) (*ScrapeResult, error) {
 	var result ScrapeResult
 	var scrapeErr error
 	result.IsAvailable = true // assume available, then disprove
+	var bodyCopy string
 
 	c := colly.NewCollector(
 		colly.AllowedDomains("www.x-kom.pl", "x-kom.pl"),
@@ -69,10 +71,14 @@ func (s *XKomScraper) ScrapeProduct(url string) (*ScrapeResult, error) {
 		colly.IgnoreRobotsTxt(),
 	)
 
+	randomJitter := 500 * time.Millisecond
+	if s.requestDelay <= 0 {
+		randomJitter = 0
+	}
 	c.Limit(&colly.LimitRule{
 		DomainGlob:  "*x-kom.pl*",
 		Delay:       s.requestDelay,
-		RandomDelay: 500 * time.Millisecond,
+		RandomDelay: randomJitter,
 		Parallelism: 1,
 	})
 
@@ -97,6 +103,7 @@ func (s *XKomScraper) ScrapeProduct(url string) (*ScrapeResult, error) {
 	// Check raw HTML body for unavailability markers.
 	c.OnResponse(func(r *colly.Response) {
 		body := string(r.Body)
+		bodyCopy = body
 
 		// Check JSON-LD availability field (schema.org).
 		if strings.Contains(body, "OutOfStock") || strings.Contains(body, "Discontinued") {
@@ -157,6 +164,17 @@ func (s *XKomScraper) ScrapeProduct(url string) (*ScrapeResult, error) {
 		if len(product.Image) > 0 {
 			result.ImageURL = product.Image[0]
 		}
+
+		result.ManufacturerCode = strings.TrimSpace(product.MPN)
+		if result.ManufacturerCode == "" {
+			sku := strings.TrimSpace(product.SKU)
+			if sku != "" && !skuLooksLikeInternalShopID(sku) {
+				result.ManufacturerCode = sku
+			}
+		}
+		if result.ManufacturerCode != "" {
+			result.ManufacturerCode = truncateManufacturerCode(result.ManufacturerCode)
+		}
 	})
 
 	// Fallback: extract price from meta tags if JSON-LD didn't work.
@@ -206,6 +224,10 @@ func (s *XKomScraper) ScrapeProduct(url string) (*ScrapeResult, error) {
 
 	if scrapeErr != nil {
 		return nil, scrapeErr
+	}
+
+	if strings.TrimSpace(result.ManufacturerCode) == "" && bodyCopy != "" {
+		result.ManufacturerCode = extractXKomManufacturerCodeFromHTML(bodyCopy)
 	}
 
 	if result.ProductName == "" && result.Price == 0 {

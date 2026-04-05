@@ -18,6 +18,7 @@ class ProductCreate(SQLModel):
     title: str
     slug: str
     category: str
+    manufacturer_code: str | None = None
     description: str | None = None
     image_url: str | None = None
     release_date: datetime | None = None
@@ -27,6 +28,7 @@ class ProductUpdate(SQLModel):
     title: str | None = None
     slug: str | None = None
     category: str | None = None
+    manufacturer_code: str | None = None
     description: str | None = None
     image_url: str | None = None
     release_date: datetime | None = None
@@ -39,6 +41,7 @@ class ProductRead(SQLModel):
     title: str
     slug: str
     category: str
+    manufacturer_code: str | None
     description: str | None
     image_url: str | None
     release_date: datetime | None
@@ -95,6 +98,7 @@ class ProductWithBestPriceRead(SQLModel):
     title: str
     slug: str
     category: str
+    manufacturer_code: str | None
     description: str | None
     image_url: str | None
     release_date: datetime | None
@@ -162,6 +166,7 @@ def _apply_product_filters(
                 Product.title.ilike(pattern),
                 Product.slug.ilike(pattern),
                 Product.category.ilike(pattern),
+                Product.manufacturer_code.ilike(pattern),
             )
             statement = statement.where(condition)
 
@@ -204,6 +209,7 @@ def list_products(
                 Product.title.ilike(pattern),
                 Product.slug.ilike(pattern),
                 Product.category.ilike(pattern),
+                Product.manufacturer_code.ilike(pattern),
             )
             query = query.where(condition)
             count_query = count_query.where(condition)
@@ -356,6 +362,7 @@ def list_products_with_prices(
                 title=product.title,
                 slug=product.slug,
                 category=product.category,
+                manufacturer_code=product.manufacturer_code,
                 description=product.description,
                 image_url=product.image_url,
                 release_date=product.release_date,
