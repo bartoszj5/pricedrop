@@ -303,7 +303,7 @@ func (db *DB) ListProductsWithSourceWithoutTargetStore(sourceStoreSlug, targetSt
 		limit = 50
 	}
 	const q = `
-		SELECT pr.id, pr.title
+		SELECT pr.id, pr.title, COALESCE(pr.manufacturer_code, '')
 		FROM products pr
 		INNER JOIN prices px ON px.product_id = pr.id
 		INNER JOIN stores sx ON sx.id = px.store_id AND sx.slug = $1 AND sx.is_active = true
@@ -325,7 +325,7 @@ func (db *DB) ListProductsWithSourceWithoutTargetStore(sourceStoreSlug, targetSt
 	var out []ProductToLink
 	for rows.Next() {
 		var p ProductToLink
-		if err := rows.Scan(&p.ID, &p.Title); err != nil {
+		if err := rows.Scan(&p.ID, &p.Title, &p.ManufacturerCode); err != nil {
 			return nil, fmt.Errorf("scanning product row: %w", err)
 		}
 		out = append(out, p)

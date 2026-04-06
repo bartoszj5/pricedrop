@@ -12,17 +12,19 @@ const defaultSearchQueryMaxLen = 120
 
 // ProductToLink is a row from ListProductsWithSourceWithoutTargetStore.
 type ProductToLink struct {
-	ID    int
-	Title string
+	ID               int
+	Title            string
+	ManufacturerCode string
 }
 
 // LinkMoreleSummary is returned after a link-morele job.
 type LinkMoreleSummary struct {
-	Processed       int `json:"processed"`
-	Linked          int `json:"linked"`
-	SkippedLowScore int `json:"skipped_low_score"`
-	NoSearchHits    int `json:"no_search_hits"`
-	Errors          int `json:"errors"`
+	Processed           int `json:"processed"`
+	Linked              int `json:"linked"`
+	SkippedLowScore     int `json:"skipped_low_score"`
+	SkippedMfrMismatch  int `json:"skipped_mfr_mismatch"`
+	NoSearchHits        int `json:"no_search_hits"`
+	Errors              int `json:"errors"`
 	DryRun          bool `json:"dry_run"`
 	Probe           bool `json:"probe"`
 	DurationMs      int64 `json:"duration_ms"`
@@ -54,6 +56,69 @@ func truncateSearchQuery(title string, maxLen int) string {
 		return strings.TrimSpace(cut[:i])
 	}
 	return strings.TrimSpace(cut)
+}
+
+// normalizeMfrKey keeps only a-z0-9 for comparing manufacturer / MPN strings.
+func normalizeMfrKey(s string) string {
+	var b strings.Builder
+	for _, r := range strings.ToLower(strings.TrimSpace(s)) {
+		if (r >= 'a' && r <= 'z') || (r >= '0' && r <= '9') {
+			b.WriteRune(r)
+		}
+	}
+	return b.String()
+}
+
+func manufacturerCodesCompatible(a, b string) bool {
+	a, b = normalizeMfrKey(a), normalizeMfrKey(b)
+	if a == "" || b == "" {
+		return true
+	}
+	if a == b {
+		return true
+	}
+	if len(a) >= 4 && strings.Contains(b, a) {
+		return true
+	}
+	if len(b) >= 4 && strings.Contains(a, b) {
+		return true
+	}
+	return false
+}
+
+func hitShowsManufacturerCode(hit *MoreleSearchHit, code string) bool {
+	c := normalizeMfrKey(code)
+	if len(c) < 4 {
+		return false
+	}
+	hay := normalizeMfrKey(hit.Title + moreleURLStem(hit.URL))
+	return strings.Contains(hay, c)
+}
+
+func moreleSearchQueriesForProduct(pr ProductToLink) []string {
+	seen := make(map[string]struct{})
+	var out []string
+	add := func(q string) {
+		q = strings.TrimSpace(q)
+		if q == "" {
+			return
+		}
+		if len(q) > defaultSearchQueryMaxLen {
+			if i := strings.LastIndexByte(q[:defaultSearchQueryMaxLen], ' '); i > 20 {
+				q = q[:i]
+			} else {
+				q = q[:defaultSearchQueryMaxLen]
+			}
+		}
+		if _, ok := seen[q]; ok {
+			return
+		}
+		seen[q] = struct{}{}
+		out = append(out, q)
+	}
+	add(stripTrademarkSymbols(pr.ManufacturerCode))
+	add(truncateSearchQuery(pr.Title, defaultSearchQueryMaxLen))
+	return out
 }
 
 func titleTokens(s string) map[string]struct{} {
@@ -132,16 +197,33 @@ func moreleURLStem(raw string) string {
 	return strings.TrimSpace(path)
 }
 
-func pickBestMoreleHit(productTitle string, hits []MoreleSearchHit) (best MoreleSearchHit, score float64, ok bool) {
+func pickBestMoreleHit(productTitle, manufacturerCode string, hits []MoreleSearchHit) (best MoreleSearchHit, score float64, ok bool) {
+	code := strings.TrimSpace(manufacturerCode)
+	pool := hits
+	if code != "" {
+		var filtered []MoreleSearchHit
+		for i := range hits {
+			if hitShowsManufacturerCode(&hits[i], code) {
+				filtered = append(filtered, hits[i])
+			}
+		}
+		if len(filtered) > 0 {
+			pool = filtered
+		}
+	}
+
 	var top *MoreleSearchHit
 	topScore := 0.0
-	for i := range hits {
-		h := &hits[i]
+	for i := range pool {
+		h := &pool[i]
 		candidate := strings.TrimSpace(h.Title)
 		if candidate == "" {
 			candidate = moreleURLStem(h.URL)
 		}
 		s := titleTokenJaccard(productTitle, candidate)
+		if code != "" && hitShowsManufacturerCode(h, code) && s < 0.42 {
+			s = 0.42
+		}
 		if s > topScore {
 			topScore = s
 			top = h
@@ -194,24 +276,36 @@ func (app *App) runLinkMorele(sourceStoreSlug, productCategory string, limit int
 
 	for _, pr := range products {
 		sum.Processed++
-		q := truncateSearchQuery(pr.Title, defaultSearchQueryMaxLen)
-		if q == "" {
+		queries := moreleSearchQueriesForProduct(pr)
+		if len(queries) == 0 {
 			sum.Errors++
 			continue
 		}
 
-		hits, err := SearchMorele(app.config.UserAgent, requestDelay, q, maxSearchHits)
-		if err != nil {
-			log.Printf("[link/morele] search %q (product %d): %v", q, pr.ID, err)
-			sum.Errors++
-			continue
+		var hits []MoreleSearchHit
+		var lastSearchErr error
+		for _, q := range queries {
+			h, err := SearchMorele(app.config.UserAgent, requestDelay, q, maxSearchHits)
+			if err != nil {
+				lastSearchErr = err
+				log.Printf("[link/morele] search %q (product %d): %v", q, pr.ID, err)
+				continue
+			}
+			if len(h) > 0 {
+				hits = h
+				break
+			}
 		}
 		if len(hits) == 0 {
-			sum.NoSearchHits++
+			if lastSearchErr != nil {
+				sum.Errors++
+			} else {
+				sum.NoSearchHits++
+			}
 			continue
 		}
 
-		best, score, ok := pickBestMoreleHit(pr.Title, hits)
+		best, score, ok := pickBestMoreleHit(pr.Title, pr.ManufacturerCode, hits)
 		if !ok || score < minScore {
 			sum.SkippedLowScore++
 			log.Printf("[link/morele] product %d: best score %.3f < %.3f — skip", pr.ID, score, minScore)
@@ -229,6 +323,15 @@ func (app *App) runLinkMorele(sourceStoreSlug, productCategory string, limit int
 			log.Printf("[link/morele] scrape %s (product %d): %v", best.URL, pr.ID, err)
 			sum.Errors++
 			continue
+		}
+
+		if want := strings.TrimSpace(pr.ManufacturerCode); want != "" {
+			got := strings.TrimSpace(scraped.ManufacturerCode)
+			if got != "" && !manufacturerCodesCompatible(want, got) {
+				sum.SkippedMfrMismatch++
+				log.Printf("[link/morele] product %d: MPN mismatch ours=%q morele=%q — skip", pr.ID, want, got)
+				continue
+			}
 		}
 
 		newPrice := math.Round(scraped.Price*100) / 100
