@@ -71,7 +71,7 @@ func (app *App) runLinkAmazon(sourceStoreSlug, productCategory string, limit int
 
 	for _, pr := range products {
 		sum.Processed++
-		queries := moreleSearchQueriesForProduct(pr)
+		queries := moreleSearchQueriesForProduct(sourceStoreSlug, pr)
 		if len(queries) == 0 {
 			sum.Errors++
 			continue
@@ -82,6 +82,7 @@ func (app *App) runLinkAmazon(sourceStoreSlug, productCategory string, limit int
 		var picked bool
 		var lastSearchErr error
 		anyResults := false
+		linkTitle := productTitleForLinking(sourceStoreSlug, pr)
 		for _, q := range queries {
 			h, err := SearchAmazon(app.config.UserAgent, searchDelay, q, maxSearchHits)
 			if err != nil {
@@ -93,11 +94,11 @@ func (app *App) runLinkAmazon(sourceStoreSlug, productCategory string, limit int
 				continue
 			}
 			anyResults = true
-			b, s, ok := pickBestAmazonHit(pr.Title, pr.ManufacturerCode, h, q)
+			b, s, ok := pickBestAmazonHit(linkTitle, manufacturerCodeForLinking(pr.ManufacturerCode), h, q)
 			if !ok || s < minScore {
 				continue
 			}
-			if !amazonHitPassesMfrTitleGuard(pr.ManufacturerCode, &b, s) {
+			if !amazonHitPassesMfrTitleGuard(manufacturerCodeForLinking(pr.ManufacturerCode), &b, s) {
 				log.Printf("[link/amazon] product %d: query %q hit %q score=%.3f — MPN not in title and score < %.2f — try next query", pr.ID, q, b.Title, s, amazonMinScoreWhenMfrNotInHit)
 				continue
 			}
@@ -134,7 +135,7 @@ func (app *App) runLinkAmazon(sourceStoreSlug, productCategory string, limit int
 			continue
 		}
 
-		if want := strings.TrimSpace(pr.ManufacturerCode); want != "" {
+		if want := manufacturerCodeForLinking(pr.ManufacturerCode); want != "" {
 			got := strings.TrimSpace(scraped.ManufacturerCode)
 			if got != "" && !manufacturerCodesCompatible(want, got) {
 				sum.SkippedMfrMismatch++

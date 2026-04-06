@@ -73,6 +73,19 @@ func mediaExpertURLStem(raw string) string {
 	return strings.TrimSpace(p)
 }
 
+// mediaExpertHitCandidateTitle prefers the main title; falls back to Synerise display_ads_title or URL stem.
+func mediaExpertHitCandidateTitle(h *mediaExpertSearchItem) string {
+	if t := strings.TrimSpace(h.Title); t != "" {
+		return t
+	}
+	if h.Attributes != nil {
+		if v := strings.TrimSpace(h.Attributes["display_ads_title"]); v != "" {
+			return v
+		}
+	}
+	return mediaExpertURLStem(mediaExpertAbsoluteURL(h.Link))
+}
+
 func mediaExpertSearchHaystack(item *mediaExpertSearchItem) string {
 	var b strings.Builder
 	b.WriteString(item.Title)
@@ -133,10 +146,7 @@ func pickBestMediaExpertHit(productTitle, manufacturerCode string, hits []mediaE
 	topScore := 0.0
 	for i := range pool {
 		h := &pool[i]
-		candidate := strings.TrimSpace(h.Title)
-		if candidate == "" {
-			candidate = mediaExpertURLStem(mediaExpertAbsoluteURL(h.Link))
-		}
+		candidate := mediaExpertHitCandidateTitle(h)
 		s := titleTokenJaccard(productTitle, candidate)
 		if code != "" && hitShowsManufacturerCodeMediaExpert(h, code) && s < 0.42 {
 			s = 0.42
@@ -160,11 +170,12 @@ func scrapeResultFromMediaExpertSearchItem(item *mediaExpertSearchItem) (*Scrape
 	if _, err := neturl.Parse(abs); err != nil {
 		return nil, "", err
 	}
-	if strings.TrimSpace(item.Title) == "" || item.Price.Value <= 0 {
+	name := mediaExpertHitCandidateTitle(item)
+	if strings.TrimSpace(name) == "" || item.Price.Value <= 0 {
 		return nil, "", errors.New("mediaexpert search item missing title or price")
 	}
 	return &ScrapeResult{
-		ProductName:      strings.TrimSpace(item.Title),
+		ProductName:      strings.TrimSpace(name),
 		Price:            item.Price.Value,
 		Currency:         "PLN",
 		ImageURL:         strings.TrimSpace(item.ImageLink),
@@ -226,7 +237,7 @@ func (app *App) runLinkMediaExpert(sourceStoreSlug, productCategory string, limi
 
 	for _, pr := range products {
 		sum.Processed++
-		queries := moreleSearchQueriesForProduct(pr)
+		queries := moreleSearchQueriesForProduct(sourceStoreSlug, pr)
 		if len(queries) == 0 {
 			sum.Errors++
 			continue
@@ -255,7 +266,8 @@ func (app *App) runLinkMediaExpert(sourceStoreSlug, productCategory string, limi
 			continue
 		}
 
-		best, score, ok := pickBestMediaExpertHit(pr.Title, pr.ManufacturerCode, hits)
+		linkTitle := productTitleForLinking(sourceStoreSlug, pr)
+		best, score, ok := pickBestMediaExpertHit(linkTitle, manufacturerCodeForLinking(pr.ManufacturerCode), hits)
 		if !ok || score < minScore {
 			sum.SkippedLowScore++
 			log.Printf("[link/mediaexpert] product %d: best score %.3f < %.3f — skip", pr.ID, score, minScore)
@@ -275,7 +287,7 @@ func (app *App) runLinkMediaExpert(sourceStoreSlug, productCategory string, limi
 			continue
 		}
 
-		if want := strings.TrimSpace(pr.ManufacturerCode); want != "" {
+		if want := manufacturerCodeForLinking(pr.ManufacturerCode); want != "" {
 			got := strings.TrimSpace(scraped.ManufacturerCode)
 			if got != "" && !manufacturerCodesCompatible(want, got) {
 				sum.SkippedMfrMismatch++

@@ -301,7 +301,7 @@ func (db *DB) ListProductsForXKOMManufacturerEnrich(onlyMissing bool, category s
 // limit > 0 caps the result set; limit == 0 means no cap (all matching rows).
 func (db *DB) ListProductsWithSourceWithoutTargetStore(sourceStoreSlug, targetStoreSlug, category string, limit int) ([]ProductToLink, error) {
 	const qLimited = `
-		SELECT pr.id, pr.title, COALESCE(pr.manufacturer_code, '')
+		SELECT pr.id, pr.title, COALESCE(pr.manufacturer_code, ''), COALESCE(px.url, '')
 		FROM products pr
 		INNER JOIN prices px ON px.product_id = pr.id
 		INNER JOIN stores sx ON sx.id = px.store_id AND sx.slug = $1 AND sx.is_active = true
@@ -315,7 +315,7 @@ func (db *DB) ListProductsWithSourceWithoutTargetStore(sourceStoreSlug, targetSt
 		LIMIT $3
 	`
 	const qAll = `
-		SELECT pr.id, pr.title, COALESCE(pr.manufacturer_code, '')
+		SELECT pr.id, pr.title, COALESCE(pr.manufacturer_code, ''), COALESCE(px.url, '')
 		FROM products pr
 		INNER JOIN prices px ON px.product_id = pr.id
 		INNER JOIN stores sx ON sx.id = px.store_id AND sx.slug = $1 AND sx.is_active = true
@@ -345,7 +345,7 @@ func (db *DB) ListProductsWithSourceWithoutTargetStore(sourceStoreSlug, targetSt
 	var out []ProductToLink
 	for rows.Next() {
 		var p ProductToLink
-		if err := rows.Scan(&p.ID, &p.Title, &p.ManufacturerCode); err != nil {
+		if err := rows.Scan(&p.ID, &p.Title, &p.ManufacturerCode, &p.SourceURL); err != nil {
 			return nil, fmt.Errorf("scanning product row: %w", err)
 		}
 		out = append(out, p)

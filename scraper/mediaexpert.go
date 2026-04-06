@@ -191,7 +191,7 @@ func mediaExpertAvailabilityFromSearch(item mediaExpertSearchItem) bool {
 		return false
 	}
 
-	title := strings.ToLower(item.Title)
+	title := strings.ToLower(mediaExpertHitCandidateTitle(&item))
 	if strings.Contains(title, "wycof") || strings.Contains(title, "niedost") {
 		return false
 	}
