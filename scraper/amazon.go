@@ -1,6 +1,7 @@
 package main
 
 import (
+	"errors"
 	"fmt"
 	"log"
 	"strconv"
@@ -9,6 +10,9 @@ import (
 
 	"github.com/gocolly/colly/v2"
 )
+
+// ErrAmazonNoBuyBoxPrice is returned when the product page loads but no price was parsed from known buy-box regions.
+var ErrAmazonNoBuyBoxPrice = errors.New("no buy box price")
 
 type AmazonScraper struct {
 	userAgent    string
@@ -30,6 +34,7 @@ func (s *AmazonScraper) ScrapeProduct(url string) (*ScrapeResult, error) {
 	var result ScrapeResult
 	var scrapeErr error
 	result.IsAvailable = true
+	var pageBody string
 
 	c := colly.NewCollector(
 		colly.AllowedDomains("www.amazon.pl", "amazon.pl"),
@@ -63,12 +68,16 @@ func (s *AmazonScraper) ScrapeProduct(url string) (*ScrapeResult, error) {
 
 	c.OnResponse(func(r *colly.Response) {
 		body := string(r.Body)
+		pageBody = body
 
 		amazonUnavailableMarkers := []string{
 			"Obecnie niedostępny",
 			"obecnie niedostępny",
 			"Currently unavailable",
 			"Tymczasowo niedostępny",
+			"Brak w magazynie",
+			"nie mamy na stanie",
+			"Ten przedmiot nie może być wysłany",
 		}
 		for _, marker := range amazonUnavailableMarkers {
 			if strings.Contains(body, marker) {
@@ -83,6 +92,20 @@ func (s *AmazonScraper) ScrapeProduct(url string) (*ScrapeResult, error) {
 		}
 	})
 
+	grabBuyBoxPrice := func(e *colly.HTMLElement) {
+		if result.Price > 0 {
+			return
+		}
+		priceText := strings.TrimSpace(e.Text)
+		price, currency := parseAmazonPrice(priceText)
+		if price > 0 {
+			result.Price = price
+			if currency != "" {
+				result.Currency = currency
+			}
+		}
+	}
+
 	// Product title: <span id="productTitle">
 	c.OnHTML(`#productTitle`, func(e *colly.HTMLElement) {
 		if result.ProductName != "" {
@@ -94,36 +117,17 @@ func (s *AmazonScraper) ScrapeProduct(url string) (*ScrapeResult, error) {
 		}
 	})
 
-	// Price from the buy-box: .a-price-whole and .a-price-fraction
-	// The first .a-price on the page is typically the main product price.
-	c.OnHTML(`#corePrice_feature_div .a-price .a-offscreen`, func(e *colly.HTMLElement) {
-		if result.Price > 0 {
-			return
-		}
-		priceText := strings.TrimSpace(e.Text)
-		price, currency := parseAmazonPrice(priceText)
-		if price > 0 {
-			result.Price = price
-			if currency != "" {
-				result.Currency = currency
-			}
-		}
-	})
-
-	// Fallback: price from the desktop buy box.
-	c.OnHTML(`#apex_desktop .a-price .a-offscreen`, func(e *colly.HTMLElement) {
-		if result.Price > 0 {
-			return
-		}
-		priceText := strings.TrimSpace(e.Text)
-		price, currency := parseAmazonPrice(priceText)
-		if price > 0 {
-			result.Price = price
-			if currency != "" {
-				result.Currency = currency
-			}
-		}
-	})
+	// Buy-box price: try several Amazon layouts (desktop / reinvent / offer display).
+	c.OnHTML(`#corePrice_feature_div .a-price .a-offscreen`, grabBuyBoxPrice)
+	c.OnHTML(`#corePriceDisplay_desktop_feature_div .a-price .a-offscreen`, grabBuyBoxPrice)
+	c.OnHTML(`#tp_price_block_total_price_ww .a-price .a-offscreen`, grabBuyBoxPrice)
+	c.OnHTML(`#tp_price_block_total_price_ww span.a-offscreen`, grabBuyBoxPrice)
+	c.OnHTML(`.reinventPricePriceToPayMargin .a-price .a-offscreen`, grabBuyBoxPrice)
+	c.OnHTML(`#apex_desktop .a-price .a-offscreen`, grabBuyBoxPrice)
+	c.OnHTML(`#apex_offerDisplay_desktop .a-price .a-offscreen`, grabBuyBoxPrice)
+	c.OnHTML(`#buybox .a-price .a-offscreen`, grabBuyBoxPrice)
+	c.OnHTML(`#snsDetailPagePrice .a-price .a-offscreen`, grabBuyBoxPrice)
+	c.OnHTML(`#mainprice_snsprice .a-price .a-offscreen`, grabBuyBoxPrice)
 
 	// Availability text: <div id="availability">
 	c.OnHTML(`#availability span`, func(e *colly.HTMLElement) {
@@ -176,6 +180,13 @@ func (s *AmazonScraper) ScrapeProduct(url string) (*ScrapeResult, error) {
 
 	if result.ProductName == "" && result.Price == 0 {
 		return nil, fmt.Errorf("no product data found at %s", url)
+	}
+
+	if result.Price <= 0 {
+		if pageBody != "" && strings.Contains(strings.ToLower(pageBody), "niedost") {
+			result.IsAvailable = false
+		}
+		return nil, fmt.Errorf("%w at %s", ErrAmazonNoBuyBoxPrice, url)
 	}
 
 	return &result, nil

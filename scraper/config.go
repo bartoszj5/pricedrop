@@ -17,6 +17,8 @@ type Config struct {
 	// Kept separate from RequestDelay so heavy page scraping can stay polite while search stays fast.
 	// Default 0; set MORELE_SEARCH_DELAY_MS e.g. 350 if Morele rate-limits you.
 	MoreleSearchDelay time.Duration
+	// AmazonSearchDelay is the pause before each /s?k= search GET (link-amazon).
+	AmazonSearchDelay time.Duration
 	UserAgent         string
 }
 
@@ -28,6 +30,7 @@ func LoadConfig() Config {
 		Port:        getEnv("PORT", "8001"),
 		RequestDelay:       time.Duration(getEnvInt("REQUEST_DELAY_MS", 2000)) * time.Millisecond,
 		MoreleSearchDelay:  time.Duration(getEnvInt("MORELE_SEARCH_DELAY_MS", 0)) * time.Millisecond,
+		AmazonSearchDelay:  time.Duration(getEnvInt("AMAZON_SEARCH_DELAY_MS", 0)) * time.Millisecond,
 		UserAgent:          getEnv("USER_AGENT", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36"),
 	}
 }
