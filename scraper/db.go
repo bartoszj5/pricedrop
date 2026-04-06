@@ -298,11 +298,9 @@ func (db *DB) ListProductsForXKOMManufacturerEnrich(onlyMissing bool, category s
 // from sourceStoreSlug (active store) and no price row for targetStoreSlug.
 // If category is non-empty, only rows with products.category = category are returned
 // (same values as crawler category keys, e.g. cpu, gpu).
+// limit > 0 caps the result set; limit == 0 means no cap (all matching rows).
 func (db *DB) ListProductsWithSourceWithoutTargetStore(sourceStoreSlug, targetStoreSlug, category string, limit int) ([]ProductToLink, error) {
-	if limit <= 0 {
-		limit = 50
-	}
-	const q = `
+	const qLimited = `
 		SELECT pr.id, pr.title, COALESCE(pr.manufacturer_code, '')
 		FROM products pr
 		INNER JOIN prices px ON px.product_id = pr.id
@@ -316,7 +314,29 @@ func (db *DB) ListProductsWithSourceWithoutTargetStore(sourceStoreSlug, targetSt
 		ORDER BY pr.id
 		LIMIT $3
 	`
-	rows, err := db.conn.Query(q, sourceStoreSlug, targetStoreSlug, limit, category)
+	const qAll = `
+		SELECT pr.id, pr.title, COALESCE(pr.manufacturer_code, '')
+		FROM products pr
+		INNER JOIN prices px ON px.product_id = pr.id
+		INNER JOIN stores sx ON sx.id = px.store_id AND sx.slug = $1 AND sx.is_active = true
+		WHERE ($3::text = '' OR pr.category = $3)
+		AND NOT EXISTS (
+			SELECT 1 FROM prices pt
+			INNER JOIN stores st ON st.id = pt.store_id AND st.slug = $2
+			WHERE pt.product_id = pr.id
+		)
+		ORDER BY pr.id
+	`
+	var rows *sql.Rows
+	var err error
+	if limit == 0 {
+		rows, err = db.conn.Query(qAll, sourceStoreSlug, targetStoreSlug, category)
+	} else {
+		if limit < 0 {
+			limit = 50
+		}
+		rows, err = db.conn.Query(qLimited, sourceStoreSlug, targetStoreSlug, limit, category)
+	}
 	if err != nil {
 		return nil, fmt.Errorf("listing products to link (%s → %s): %w", sourceStoreSlug, targetStoreSlug, err)
 	}

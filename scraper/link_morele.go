@@ -261,9 +261,9 @@ func (app *App) runLinkMorele(sourceStoreSlug, productCategory string, limit int
 		}
 	}
 
-	requestDelay := app.config.RequestDelay
+	searchDelay := app.config.MoreleSearchDelay
 	if probe {
-		requestDelay = 0
+		searchDelay = 0
 	}
 
 	products, err := app.db.ListProductsWithSourceWithoutTargetStore(sourceStoreSlug, "morele", productCategory, limit)
@@ -285,7 +285,7 @@ func (app *App) runLinkMorele(sourceStoreSlug, productCategory string, limit int
 		var hits []MoreleSearchHit
 		var lastSearchErr error
 		for _, q := range queries {
-			h, err := SearchMorele(app.config.UserAgent, requestDelay, q, maxSearchHits)
+			h, err := SearchMorele(app.config.UserAgent, searchDelay, q, maxSearchHits)
 			if err != nil {
 				lastSearchErr = err
 				log.Printf("[link/morele] search %q (product %d): %v", q, pr.ID, err)

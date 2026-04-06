@@ -536,11 +536,13 @@ func writeJSON(w http.ResponseWriter, status int, v interface{}) {
 
 // handleLinkMorele matches DB products (with source store price, without Morele) to Morele via search.
 // POST /link/morele
-// Query: source (default x-kom), limit (default 20, max 500), min_score (default 0.32),
-// max_candidates (default 25), dry_run (default true; pass dry_run=false to write prices),
+// Query: source (default x-kom), limit (default 20; use limit=0 for all matching products),
+// min_score (default 0.32), max_candidates (default 25),
+// dry_run (default true; pass dry_run=false to write prices),
 // probe (pass probe=true for zero request delay on search + Morele scrape — use only for small tests),
 // category (optional; crawler key e.g. cpu — only products with this products.category).
 // Search order: manufacturer_code (if set) first, then product title — Morele /wyszukiwarka/.
+// Search pacing uses MORELE_SEARCH_DELAY_MS (default 0), not REQUEST_DELAY_MS, so link jobs stay fast.
 func (app *App) handleLinkMorele(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
@@ -552,10 +554,11 @@ func (app *App) handleLinkMorele(w http.ResponseWriter, r *http.Request) {
 
 	limit := 20
 	if v := r.URL.Query().Get("limit"); v != "" {
-		if n, err := strconv.Atoi(v); err == nil && n > 0 {
-			limit = n
-			if limit > 500 {
-				limit = 500
+		if n, err := strconv.Atoi(v); err == nil {
+			if n == 0 {
+				limit = 0
+			} else if n > 0 {
+				limit = n
 			}
 		}
 	}
@@ -571,9 +574,6 @@ func (app *App) handleLinkMorele(w http.ResponseWriter, r *http.Request) {
 	if v := r.URL.Query().Get("max_candidates"); v != "" {
 		if n, err := strconv.Atoi(v); err == nil && n > 0 {
 			maxCandidates = n
-			if maxCandidates > 60 {
-				maxCandidates = 60
-			}
 		}
 	}
 
@@ -620,7 +620,7 @@ func (app *App) handleLinkMorele(w http.ResponseWriter, r *http.Request) {
 
 // handleLinkMediaExpert matches DB products (with source store price, without Media Expert) via Synerise search.
 // POST /link/mediaexpert
-// Query: same as /link/morele — source, limit, min_score, max_candidates, dry_run, probe, category.
+// Query: same as /link/morele — source, limit (0 = all matching), min_score, max_candidates, dry_run, probe, category.
 // Search order: manufacturer_code first, then title (same as Morele). One JSON search API call per query attempt; no extra product page fetch.
 func (app *App) handleLinkMediaExpert(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
@@ -633,10 +633,11 @@ func (app *App) handleLinkMediaExpert(w http.ResponseWriter, r *http.Request) {
 
 	limit := 20
 	if v := r.URL.Query().Get("limit"); v != "" {
-		if n, err := strconv.Atoi(v); err == nil && n > 0 {
-			limit = n
-			if limit > 500 {
-				limit = 500
+		if n, err := strconv.Atoi(v); err == nil {
+			if n == 0 {
+				limit = 0
+			} else if n > 0 {
+				limit = n
 			}
 		}
 	}
@@ -652,9 +653,6 @@ func (app *App) handleLinkMediaExpert(w http.ResponseWriter, r *http.Request) {
 	if v := r.URL.Query().Get("max_candidates"); v != "" {
 		if n, err := strconv.Atoi(v); err == nil && n > 0 {
 			maxCandidates = n
-			if maxCandidates > 60 {
-				maxCandidates = 60
-			}
 		}
 	}
 
