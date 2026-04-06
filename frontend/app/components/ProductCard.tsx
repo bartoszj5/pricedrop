@@ -1,6 +1,6 @@
 import Image from "next/image";
 import Link from "next/link";
-import { ArrowUpRight, Radar, Store as StoreIcon, Tag } from "lucide-react";
+import { ArrowUpRight, ImageOff, Radar, Store as StoreIcon, Tag } from "lucide-react";
 import { remoteImageOptions } from "../lib/remoteImage";
 import type { ProductWithBestPrice } from "../types";
 import { formatPrice, humanizeCategory } from "../lib/utils";
@@ -29,8 +29,8 @@ export default function ProductCard({ product }: ProductCardProps) {
             {...remoteImageOptions(product.image_url)}
           />
         ) : (
-          <div className="flex h-full w-full items-center justify-center text-sm text-text-muted">
-            Brak obrazka
+          <div className="flex h-full w-full flex-col items-center justify-center gap-2 text-text-muted">
+            <ImageOff className="h-8 w-8" />
           </div>
         )}
 
@@ -79,16 +79,12 @@ export default function ProductCard({ product }: ProductCardProps) {
           )}
         </div>
 
-        <div className="text-sm">
-          <div className="rounded-[22px] border border-border bg-bg-secondary px-4 py-3">
-            <p className="text-xs font-semibold uppercase tracking-[0.16em] text-text-muted">
-              Aktywne oferty
-            </p>
-            <p className="mt-2 text-xl font-semibold text-text-primary">
-              {availableOffersCount}
-            </p>
+        {availableOffersCount > 0 && (
+          <div className="inline-flex w-fit items-center gap-2 rounded-full border border-border bg-bg-secondary px-3 py-1.5 text-xs font-semibold text-text-secondary">
+            <Radar className="h-3.5 w-3.5 text-accent" />
+            {availableOffersCount} {availableOffersCount === 1 ? "oferta" : availableOffersCount < 5 ? "oferty" : "ofert"}
           </div>
-        </div>
+        )}
 
         <div className="mt-auto flex items-end justify-between gap-3 border-t border-border/80 pt-4">
           <div>

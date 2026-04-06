@@ -17,7 +17,7 @@ import {
 } from "react";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import CatalogFiltersContent from "./CatalogFiltersContent";
-import { syncGamesAction } from "../search/actions";
+import { syncGamesAction } from "../games/actions";
 import type { ProductSort, StoreRead } from "../types";
 
 export interface CatalogLookupIssue {
@@ -101,7 +101,10 @@ export default function CatalogControls({
         }
         setLookupIssue(null);
         enrichCompletedForRef.current = trimmedUrlSearch;
-        router.refresh();
+        const refreshUrl = buildUrl({});
+        startNavTransition(() => {
+          router.replace(refreshUrl, { scroll: false });
+        });
       } finally {
         if (!cancelled) {
           setIsEnrichingCatalog(false);
@@ -275,12 +278,12 @@ export default function CatalogControls({
       )}
 
       {mobileOpen && (
-        <div className="fixed inset-0 z-50 bg-text-primary/20 backdrop-blur-sm lg:hidden">
+        <div className="animate-fade-in fixed inset-0 z-50 bg-text-primary/20 backdrop-blur-sm lg:hidden">
           <div
             role="dialog"
             aria-modal="true"
             aria-labelledby="catalog-filters-title"
-            className="absolute inset-x-3 bottom-3 top-20 overflow-y-auto rounded-[30px] border border-border bg-bg-secondary p-5 shadow-[var(--shadow-float)]"
+            className="animate-slide-up absolute inset-x-3 bottom-3 top-20 overflow-y-auto rounded-[30px] border border-border bg-bg-secondary p-5 shadow-[var(--shadow-float)]"
           >
             <div className="mb-5 flex items-center justify-between">
               <div>

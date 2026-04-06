@@ -8,8 +8,8 @@ export function SkeletonBox({ className = "" }: { className?: string }) {
 
 export function SkeletonCard() {
   return (
-    <div className="flex flex-col bg-bg-card rounded-xl overflow-hidden">
-      <SkeletonBox className="w-full h-[140px] rounded-none" />
+    <div className="flex flex-col bg-bg-card rounded-[30px] border border-border shadow-[var(--shadow-card)] overflow-hidden">
+      <SkeletonBox className="w-full aspect-[4/3] rounded-none" />
       <div className="flex flex-col gap-2.5 p-3.5">
         <div className="flex gap-1.5">
           <SkeletonBox className="w-14 h-[22px]" />

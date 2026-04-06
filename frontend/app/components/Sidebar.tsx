@@ -54,7 +54,7 @@ export default function Sidebar({
 
   return (
     <aside className="hidden w-[280px] shrink-0 lg:block">
-      <div className="sticky top-6 flex max-h-[calc(100vh-48px)] flex-col gap-6 overflow-y-auto rounded-[28px] border border-border bg-gradient-to-b from-[rgba(255,251,244,0.98)] to-[rgba(255,253,248,0.94)] p-5 shadow-[var(--shadow-card)]">
+      <div className="sticky top-[100px] flex max-h-[calc(100vh-124px)] flex-col gap-6 overflow-y-auto rounded-[28px] border border-border bg-gradient-to-b from-[rgba(255,251,244,0.98)] to-[rgba(255,253,248,0.94)] p-5 shadow-[var(--shadow-card)]">
         <div className="flex items-center justify-between">
           <div className="flex items-center gap-2">
             <SlidersHorizontal className="h-4 w-4 text-text-muted" />

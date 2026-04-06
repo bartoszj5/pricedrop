@@ -6,6 +6,7 @@ import {
   ArrowUpRight,
   Calendar,
   Clock3,
+  ImageOff,
   Radar,
   ShoppingBag,
   Tag,
@@ -95,8 +96,8 @@ export default async function ProductDetailPage({ params }: PageProps) {
               {...remoteImageOptions(product.image_url)}
             />
           ) : (
-            <div className="flex min-h-[280px] items-center justify-center text-text-muted">
-              Brak obrazka
+            <div className="flex min-h-[280px] flex-col items-center justify-center gap-2 text-text-muted">
+              <ImageOff className="h-10 w-10" />
             </div>
           )}
         </div>
@@ -160,7 +161,7 @@ export default async function ProductDetailPage({ params }: PageProps) {
             <div className="section-subtle flex flex-wrap items-center gap-3 border-accent-green/20 bg-accent-green-soft p-5">
               <ShoppingBag className="h-5 w-5 text-accent-green" />
               <span className="text-sm text-text-secondary">Najlepsza aktywna oferta:</span>
-              <span className="text-2xl font-extrabold text-accent-green">
+              <span className="text-2xl text-accent-green">
                 {formatPrice(cheapest.current_price ?? 0, cheapest.currency ?? "PLN")}
               </span>
               <span className="text-sm text-text-secondary">w {cheapest.store_name}</span>

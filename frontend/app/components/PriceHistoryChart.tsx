@@ -69,7 +69,7 @@ export default function PriceHistoryChart({ history }: PriceHistoryChartProps) {
   return (
     <ResponsiveContainer width="100%" height={320}>
       <LineChart data={chartData} margin={{ top: 5, right: 20, bottom: 5, left: 10 }}>
-        <CartesianGrid strokeDasharray="3 3" stroke="#2D3148" />
+        <CartesianGrid strokeDasharray="3 3" stroke="rgba(218,205,183,0.5)" />
         <XAxis
           dataKey="date"
           stroke="#7a796f"
