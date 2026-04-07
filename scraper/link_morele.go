@@ -15,6 +15,7 @@ type ProductToLink struct {
 	ID               int
 	Title            string
 	ManufacturerCode string
+	SourceURL        string
 }
 
 // LinkMoreleSummary is returned after a link-morele job.
@@ -95,7 +96,17 @@ func hitShowsManufacturerCode(hit *MoreleSearchHit, code string) bool {
 	return strings.Contains(hay, c)
 }
 
-func moreleSearchQueriesForProduct(pr ProductToLink) []string {
+// productTitleForLinking returns the product title cleaned up for fuzzy matching.
+func productTitleForLinking(sourceStoreSlug string, pr ProductToLink) string {
+	return strings.TrimSpace(pr.Title)
+}
+
+// manufacturerCodeForLinking normalises a manufacturer code for comparison during linking.
+func manufacturerCodeForLinking(code string) string {
+	return strings.TrimSpace(code)
+}
+
+func moreleSearchQueriesForProduct(sourceStoreSlug string, pr ProductToLink) []string {
 	seen := make(map[string]struct{})
 	var out []string
 	add := func(q string) {
@@ -276,7 +287,7 @@ func (app *App) runLinkMorele(sourceStoreSlug, productCategory string, limit int
 
 	for _, pr := range products {
 		sum.Processed++
-		queries := moreleSearchQueriesForProduct(pr)
+		queries := moreleSearchQueriesForProduct(sourceStoreSlug, pr)
 		if len(queries) == 0 {
 			sum.Errors++
 			continue
