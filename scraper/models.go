@@ -51,9 +51,10 @@ type PriceWithContext struct {
 
 // ScrapeResult holds the data extracted from a store page.
 type ScrapeResult struct {
-	ProductName string
-	Price       float64
-	Currency    string
-	IsAvailable bool
-	ImageURL    string
+	ProductName      string
+	Price            float64
+	Currency         string
+	IsAvailable      bool
+	ImageURL         string
+	ManufacturerCode string // MPN / kod producenta when present on the page
 }

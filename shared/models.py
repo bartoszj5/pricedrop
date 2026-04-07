@@ -14,6 +14,7 @@ class Product(SQLModel, table=True):
     title: str = Field(max_length=255, index=True)
     slug: str = Field(max_length=255, unique=True, index=True)
     category: str = Field(max_length=50, index=True)
+    manufacturer_code: str | None = Field(default=None, max_length=128, index=True)
     description: str | None = Field(default=None)
     image_url: str | None = Field(default=None, max_length=512)
     release_date: datetime | None = Field(default=None)

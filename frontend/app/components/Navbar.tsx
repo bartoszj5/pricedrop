@@ -9,7 +9,7 @@ const navLinks = [
   ...(process.env.NODE_ENV !== "production"
     ? [{ label: "Sklepy" as const, href: "/stores" as const }]
     : []),
-  { label: "Gry", href: "/search" },
+  { label: "Gry", href: "/games" },
 ];
 
 export default function Navbar() {
@@ -31,7 +31,7 @@ export default function Navbar() {
           </Link>
         </div>
 
-        <nav className="flex items-center gap-2 overflow-x-auto pb-1 lg:pb-0">
+        <nav className="scrollbar-hide flex items-center gap-2 overflow-x-auto pb-1 lg:pb-0">
         {navLinks.map((link) => {
           const isActive =
             link.href === "/"

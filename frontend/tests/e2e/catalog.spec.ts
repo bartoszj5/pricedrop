@@ -64,7 +64,7 @@ test("store detail paginates large inventories", async ({ page }) => {
 test("games search updates URL without exposing import control", async ({
   page,
 }) => {
-  await page.goto("/search");
+  await page.goto("/games");
 
   const input = page.getByLabel("Szukaj gier po tytule");
   await input.fill("Baldur");

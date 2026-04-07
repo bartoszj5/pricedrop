@@ -17,7 +17,7 @@ export default function NotFound() {
         </div>
         <Link
           href="/"
-          className="inline-flex items-center gap-2 rounded-full border border-accent bg-accent px-6 py-3 text-sm font-semibold text-white"
+          className="inline-flex items-center gap-2 rounded-full border border-accent bg-accent px-6 py-3 text-sm font-semibold text-white hover:-translate-y-0.5"
         >
           Wróć na stronę główną
           <ArrowRight className="h-4 w-4" />

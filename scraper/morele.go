@@ -15,6 +15,8 @@ type moreleJSONLDProduct struct {
 	Type      string            `json:"@type"`
 	Name      string            `json:"name"`
 	ProductID string            `json:"productID"`
+	SKU       string            `json:"sku"`
+	MPN       string            `json:"mpn"`
 	Image     []string          `json:"image"`
 	Offers    moreleJSONLDOffer `json:"offers"`
 }
@@ -52,10 +54,14 @@ func (s *MoreleScraper) ScrapeProduct(url string) (*ScrapeResult, error) {
 		colly.IgnoreRobotsTxt(),
 	)
 
+	randomJitter := 500 * time.Millisecond
+	if s.requestDelay <= 0 {
+		randomJitter = 0
+	}
 	c.Limit(&colly.LimitRule{
 		DomainGlob:  "*morele.net*",
 		Delay:       s.requestDelay,
-		RandomDelay: 500 * time.Millisecond,
+		RandomDelay: randomJitter,
 		Parallelism: 1,
 	})
 
@@ -144,6 +150,14 @@ func (s *MoreleScraper) ScrapeProduct(url string) (*ScrapeResult, error) {
 
 		if len(product.Image) > 0 {
 			result.ImageURL = product.Image[0]
+		}
+
+		result.ManufacturerCode = strings.TrimSpace(product.MPN)
+		if result.ManufacturerCode == "" {
+			result.ManufacturerCode = strings.TrimSpace(product.SKU)
+		}
+		if result.ManufacturerCode != "" {
+			result.ManufacturerCode = truncateManufacturerCode(result.ManufacturerCode)
 		}
 	})
 

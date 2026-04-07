@@ -4,6 +4,7 @@ import (
 	"database/sql"
 	"fmt"
 	"log"
+	"math"
 	"strings"
 	"time"
 
@@ -193,7 +194,8 @@ func (db *DB) PriceExistsByURL(url string) (bool, error) {
 // UpsertProductAndPrice inserts a product (or finds an existing one by slug) and
 // creates a price record linking it to the given store. If the price record
 // already exists (product_id, store_id unique constraint), it is skipped.
-func (db *DB) UpsertProductAndPrice(title, productSlug, category, imageURL string, storeID int, price float64, currency, url string) error {
+// manufacturerCode: when non-empty, set on insert or overwrite on conflict when provided.
+func (db *DB) UpsertProductAndPrice(title, productSlug, category, imageURL string, storeID int, price float64, currency, url, manufacturerCode string) error {
 	tx, err := db.conn.Begin()
 	if err != nil {
 		return fmt.Errorf("beginning transaction: %w", err)
@@ -205,13 +207,14 @@ func (db *DB) UpsertProductAndPrice(title, productSlug, category, imageURL strin
 	// Upsert product — if slug already exists, keep existing data and update image if missing.
 	var productID int
 	err = tx.QueryRow(`
-		INSERT INTO products (title, slug, category, image_url, created_at, updated_at)
-		VALUES ($1, $2, $3, $4, $5, $5)
+		INSERT INTO products (title, slug, category, image_url, manufacturer_code, created_at, updated_at)
+		VALUES ($1, $2, $3, $4, NULLIF(TRIM($5), ''), $6, $6)
 		ON CONFLICT (slug) DO UPDATE SET
 			image_url = COALESCE(NULLIF(products.image_url, ''), EXCLUDED.image_url),
-			updated_at = $5
+			manufacturer_code = COALESCE(NULLIF(TRIM(EXCLUDED.manufacturer_code), ''), NULLIF(products.manufacturer_code, '')),
+			updated_at = $6
 		RETURNING id
-	`, title, productSlug, category, imageURL, now).Scan(&productID)
+	`, title, productSlug, category, imageURL, manufacturerCode, now).Scan(&productID)
 	if err != nil {
 		return fmt.Errorf("upserting product %s: %w", productSlug, err)
 	}
@@ -224,6 +227,182 @@ func (db *DB) UpsertProductAndPrice(title, productSlug, category, imageURL strin
 	`, productID, storeID, price, currency, url, now)
 	if err != nil {
 		return fmt.Errorf("inserting price for product %d store %d: %w", productID, storeID, err)
+	}
+
+	return tx.Commit()
+}
+
+// SetProductManufacturerCode sets manufacturer_code when code is non-empty (overwrites existing).
+func (db *DB) SetProductManufacturerCode(productID int, code string) error {
+	code = strings.TrimSpace(code)
+	if code == "" {
+		return nil
+	}
+	if len(code) > 128 {
+		code = code[:128]
+	}
+	now := time.Now().UTC()
+	_, err := db.conn.Exec(`
+		UPDATE products SET manufacturer_code = $1, updated_at = $2 WHERE id = $3
+	`, code, now, productID)
+	if err != nil {
+		return fmt.Errorf("setting manufacturer_code for product %d: %w", productID, err)
+	}
+	return nil
+}
+
+// ProductIDURL is a product id with a store product page URL (e.g. x-kom offer).
+type ProductIDURL struct {
+	ID  int
+	URL string
+}
+
+// ListProductsForXKOMManufacturerEnrich returns products that have an x-kom price row.
+// If onlyMissing is true, rows with manufacturer_code already set are skipped.
+// category filters by products.category when non-empty.
+func (db *DB) ListProductsForXKOMManufacturerEnrich(onlyMissing bool, category string, limit int) ([]ProductIDURL, error) {
+	if limit <= 0 {
+		limit = 500
+	}
+	if limit > 5000 {
+		limit = 5000
+	}
+	const q = `
+		SELECT pr.id, px.url
+		FROM products pr
+		INNER JOIN prices px ON px.product_id = pr.id
+		INNER JOIN stores s ON s.id = px.store_id AND s.slug = 'x-kom' AND s.is_active = true
+		WHERE ($1::bool = false OR pr.manufacturer_code IS NULL OR btrim(pr.manufacturer_code) = '')
+		AND ($2::text = '' OR pr.category = $2)
+		ORDER BY pr.id
+		LIMIT $3
+	`
+	rows, err := db.conn.Query(q, onlyMissing, category, limit)
+	if err != nil {
+		return nil, fmt.Errorf("listing x-kom products for manufacturer enrich: %w", err)
+	}
+	defer rows.Close()
+
+	var out []ProductIDURL
+	for rows.Next() {
+		var r ProductIDURL
+		if err := rows.Scan(&r.ID, &r.URL); err != nil {
+			return nil, fmt.Errorf("scanning enrich row: %w", err)
+		}
+		out = append(out, r)
+	}
+	return out, rows.Err()
+}
+
+// ListProductsWithSourceWithoutTargetStore returns products that have at least one price
+// from sourceStoreSlug (active store) and no price row for targetStoreSlug.
+// If category is non-empty, only rows with products.category = category are returned
+// (same values as crawler category keys, e.g. cpu, gpu).
+// limit > 0 caps the result set; limit == 0 means no cap (all matching rows).
+func (db *DB) ListProductsWithSourceWithoutTargetStore(sourceStoreSlug, targetStoreSlug, category string, limit int) ([]ProductToLink, error) {
+	const qLimited = `
+		SELECT pr.id, pr.title, COALESCE(pr.manufacturer_code, ''), COALESCE(px.url, '')
+		FROM products pr
+		INNER JOIN prices px ON px.product_id = pr.id
+		INNER JOIN stores sx ON sx.id = px.store_id AND sx.slug = $1 AND sx.is_active = true
+		WHERE ($4::text = '' OR pr.category = $4)
+		AND NOT EXISTS (
+			SELECT 1 FROM prices pt
+			INNER JOIN stores st ON st.id = pt.store_id AND st.slug = $2
+			WHERE pt.product_id = pr.id
+		)
+		ORDER BY pr.id
+		LIMIT $3
+	`
+	const qAll = `
+		SELECT pr.id, pr.title, COALESCE(pr.manufacturer_code, ''), COALESCE(px.url, '')
+		FROM products pr
+		INNER JOIN prices px ON px.product_id = pr.id
+		INNER JOIN stores sx ON sx.id = px.store_id AND sx.slug = $1 AND sx.is_active = true
+		WHERE ($3::text = '' OR pr.category = $3)
+		AND NOT EXISTS (
+			SELECT 1 FROM prices pt
+			INNER JOIN stores st ON st.id = pt.store_id AND st.slug = $2
+			WHERE pt.product_id = pr.id
+		)
+		ORDER BY pr.id
+	`
+	var rows *sql.Rows
+	var err error
+	if limit == 0 {
+		rows, err = db.conn.Query(qAll, sourceStoreSlug, targetStoreSlug, category)
+	} else {
+		if limit < 0 {
+			limit = 50
+		}
+		rows, err = db.conn.Query(qLimited, sourceStoreSlug, targetStoreSlug, limit, category)
+	}
+	if err != nil {
+		return nil, fmt.Errorf("listing products to link (%s → %s): %w", sourceStoreSlug, targetStoreSlug, err)
+	}
+	defer rows.Close()
+
+	var out []ProductToLink
+	for rows.Next() {
+		var p ProductToLink
+		if err := rows.Scan(&p.ID, &p.Title, &p.ManufacturerCode, &p.SourceURL); err != nil {
+			return nil, fmt.Errorf("scanning product row: %w", err)
+		}
+		out = append(out, p)
+	}
+	return out, rows.Err()
+}
+
+// UpsertPriceForProduct inserts or updates a price for an existing product and store.
+// When the price value changes on update, a row is appended to price_history.
+func (db *DB) UpsertPriceForProduct(productID, storeID int, newPrice float64, currency, productURL string, isAvailable bool) error {
+	tx, err := db.conn.Begin()
+	if err != nil {
+		return fmt.Errorf("beginning transaction: %w", err)
+	}
+	defer tx.Rollback()
+
+	now := time.Now().UTC()
+	newRounded := math.Round(newPrice*100) / 100
+
+	var priceID int
+	var oldPrice float64
+	err = tx.QueryRow(`
+		SELECT id, current_price FROM prices WHERE product_id = $1 AND store_id = $2
+	`, productID, storeID).Scan(&priceID, &oldPrice)
+
+	if err == sql.ErrNoRows {
+		_, err = tx.Exec(`
+			INSERT INTO prices (product_id, store_id, current_price, currency, url, is_available, last_checked_at, created_at, updated_at)
+			VALUES ($1, $2, $3, $4, $5, $6, $7, $7, $7)
+		`, productID, storeID, newRounded, currency, productURL, isAvailable, now)
+		if err != nil {
+			return fmt.Errorf("inserting price for product %d store %d: %w", productID, storeID, err)
+		}
+		return tx.Commit()
+	}
+	if err != nil {
+		return fmt.Errorf("selecting price for product %d store %d: %w", productID, storeID, err)
+	}
+
+	_, err = tx.Exec(`
+		UPDATE prices
+		SET current_price = $1, currency = $2, url = $3, is_available = $4, last_checked_at = $5, updated_at = $5
+		WHERE id = $6
+	`, newRounded, currency, productURL, isAvailable, now, priceID)
+	if err != nil {
+		return fmt.Errorf("updating price %d: %w", priceID, err)
+	}
+
+	oldRounded := math.Round(oldPrice*100) / 100
+	if oldRounded != newRounded {
+		_, err = tx.Exec(`
+			INSERT INTO price_history (price_id, old_price, new_price, currency, recorded_at)
+			VALUES ($1, $2, $3, $4, $5)
+		`, priceID, oldRounded, newRounded, currency, now)
+		if err != nil {
+			return fmt.Errorf("inserting price history for %d: %w", priceID, err)
+		}
 	}
 
 	return tx.Commit()

@@ -3,6 +3,7 @@ export interface Product {
   title: string;
   slug: string;
   category: string;
+  manufacturer_code: string | null;
   description: string | null;
   image_url: string | null;
   release_date: string | null;
