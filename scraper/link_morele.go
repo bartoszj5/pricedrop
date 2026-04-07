@@ -2,90 +2,10 @@ package main
 
 import (
 	"log"
-	"math"
 	"net/url"
 	"strings"
 	"time"
 )
-
-const defaultSearchQueryMaxLen = 120
-
-// ProductToLink is a row from ListProductsWithSourceWithoutTargetStore.
-type ProductToLink struct {
-	ID               int
-	Title            string
-	ManufacturerCode string
-	SourceURL        string
-}
-
-// LinkMoreleSummary is returned after a link-morele job.
-type LinkMoreleSummary struct {
-	Processed          int   `json:"processed"`
-	Linked             int   `json:"linked"`
-	SkippedLowScore    int   `json:"skipped_low_score"`
-	SkippedMfrMismatch int   `json:"skipped_mfr_mismatch"`
-	NoSearchHits       int   `json:"no_search_hits"`
-	Errors             int   `json:"errors"`
-	DryRun             bool  `json:"dry_run"`
-	Probe              bool  `json:"probe"`
-	DurationMs         int64 `json:"duration_ms"`
-}
-
-var stripTitleNoise = strings.NewReplacer(
-	"\u2122", "", // ™
-	"\u00ae", "", // ®
-	"\u00a9", "", // ©
-	"\u00a0", " ", // NBSP
-)
-
-// stripTrademarkSymbols removes ™, ®, © and NBSP for search queries and token matching.
-func stripTrademarkSymbols(s string) string {
-	s = stripTitleNoise.Replace(s)
-	return strings.TrimSpace(s)
-}
-
-func truncateSearchQuery(title string, maxLen int) string {
-	title = stripTrademarkSymbols(strings.TrimSpace(title))
-	if maxLen <= 0 {
-		maxLen = defaultSearchQueryMaxLen
-	}
-	if len(title) <= maxLen {
-		return title
-	}
-	cut := title[:maxLen]
-	if i := strings.LastIndexByte(cut, ' '); i > 40 {
-		return strings.TrimSpace(cut[:i])
-	}
-	return strings.TrimSpace(cut)
-}
-
-// normalizeMfrKey keeps only a-z0-9 for comparing manufacturer / MPN strings.
-func normalizeMfrKey(s string) string {
-	var b strings.Builder
-	for _, r := range strings.ToLower(strings.TrimSpace(s)) {
-		if (r >= 'a' && r <= 'z') || (r >= '0' && r <= '9') {
-			b.WriteRune(r)
-		}
-	}
-	return b.String()
-}
-
-func manufacturerCodesCompatible(a, b string) bool {
-	a, b = normalizeMfrKey(a), normalizeMfrKey(b)
-	if a == "" || b == "" {
-		return true
-	}
-	if a == b {
-		return true
-	}
-	if len(a) >= 4 && strings.Contains(b, a) {
-		return true
-	}
-	if len(b) >= 4 && strings.Contains(a, b) {
-		return true
-	}
-	return false
-}
 
 func hitShowsManufacturerCode(hit *MoreleSearchHit, code string) bool {
 	c := normalizeMfrKey(code)
@@ -94,81 +14,6 @@ func hitShowsManufacturerCode(hit *MoreleSearchHit, code string) bool {
 	}
 	hay := normalizeMfrKey(hit.Title + moreleURLStem(hit.URL))
 	return strings.Contains(hay, c)
-}
-
-// productTitleForLinking returns the product title cleaned up for fuzzy matching.
-func productTitleForLinking(sourceStoreSlug string, pr ProductToLink) string {
-	return strings.TrimSpace(pr.Title)
-}
-
-// manufacturerCodeForLinking normalises a manufacturer code for comparison during linking.
-func manufacturerCodeForLinking(code string) string {
-	return strings.TrimSpace(code)
-}
-
-func searchQueriesForProduct(sourceStoreSlug string, pr ProductToLink) []string {
-	seen := make(map[string]struct{})
-	var out []string
-	add := func(q string) {
-		q = strings.TrimSpace(q)
-		if q == "" {
-			return
-		}
-		if len(q) > defaultSearchQueryMaxLen {
-			if i := strings.LastIndexByte(q[:defaultSearchQueryMaxLen], ' '); i > 20 {
-				q = q[:i]
-			} else {
-				q = q[:defaultSearchQueryMaxLen]
-			}
-		}
-		if _, ok := seen[q]; ok {
-			return
-		}
-		seen[q] = struct{}{}
-		out = append(out, q)
-	}
-	add(stripTrademarkSymbols(pr.ManufacturerCode))
-	add(truncateSearchQuery(pr.Title, defaultSearchQueryMaxLen))
-	return out
-}
-
-func titleTokens(s string) map[string]struct{} {
-	s = stripTrademarkSymbols(strings.TrimSpace(s))
-	if s == "" {
-		return nil
-	}
-	s = cleanProductTitle(normalizeTitle(s))
-	s = strings.ToLower(diacriticReplacer.Replace(s))
-	parts := nonAlphanumRegex.Split(s, -1)
-	out := make(map[string]struct{})
-	for _, p := range parts {
-		p = strings.TrimSpace(p)
-		if len(p) < 2 {
-			continue
-		}
-		out[p] = struct{}{}
-	}
-	return out
-}
-
-// titleTokenJaccard compares two product titles (0..1). Higher = more similar token overlap.
-func titleTokenJaccard(a, b string) float64 {
-	A := titleTokens(a)
-	B := titleTokens(b)
-	if len(A) == 0 || len(B) == 0 {
-		return 0
-	}
-	inter := 0
-	for t := range A {
-		if _, ok := B[t]; ok {
-			inter++
-		}
-	}
-	union := len(A) + len(B) - inter
-	if union == 0 {
-		return 0
-	}
-	return float64(inter) / float64(union)
 }
 
 // moreleURLStem derives a rough title from a Morele product path when link text is empty.
@@ -246,9 +91,9 @@ func pickBestMoreleHit(productTitle, manufacturerCode string, hits []MoreleSearc
 	return *top, topScore, true
 }
 
-func (app *App) runLinkMorele(sourceStoreSlug, productCategory string, limit int, minScore float64, maxSearchHits int, dryRun, probe bool) LinkMoreleSummary {
+func (app *App) runLinkMorele(sourceStoreSlug, productCategory string, limit int, minScore float64, maxSearchHits int, dryRun, probe bool) LinkSummary {
 	start := time.Now()
-	sum := LinkMoreleSummary{DryRun: dryRun, Probe: probe}
+	sum := LinkSummary{DryRun: dryRun, Probe: probe}
 
 	moreleStore, err := app.db.GetStoreBySlug("morele")
 	if err != nil {
@@ -336,29 +181,7 @@ func (app *App) runLinkMorele(sourceStoreSlug, productCategory string, limit int
 			continue
 		}
 
-		if want := strings.TrimSpace(pr.ManufacturerCode); want != "" {
-			got := strings.TrimSpace(scraped.ManufacturerCode)
-			if got != "" && !manufacturerCodesCompatible(want, got) {
-				sum.SkippedMfrMismatch++
-				log.Printf("[link/morele] product %d: MPN mismatch ours=%q morele=%q — skip", pr.ID, want, got)
-				continue
-			}
-		}
-
-		newPrice := math.Round(scraped.Price*100) / 100
-		currency := scraped.Currency
-		if currency == "" {
-			currency = "PLN"
-		}
-
-		if err := app.db.UpsertPriceForProduct(pr.ID, moreleStore.ID, newPrice, currency, best.URL, scraped.IsAvailable); err != nil {
-			log.Printf("[link/morele] upsert price product %d: %v", pr.ID, err)
-			sum.Errors++
-			continue
-		}
-
-		sum.Linked++
-		log.Printf("[link/morele] product %d: linked score=%.3f price=%.2f %s url=%s", pr.ID, score, newPrice, currency, best.URL)
+		linkVerifyAndUpsert(app, &sum, "morele", pr, moreleStore.ID, scraped, best.URL, score)
 	}
 
 	sum.DurationMs = time.Since(start).Milliseconds()

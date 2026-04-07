@@ -3,24 +3,10 @@ package main
 import (
 	"errors"
 	"log"
-	"math"
 	neturl "net/url"
 	"strings"
 	"time"
 )
-
-// LinkMediaExpertSummary is returned after a link-mediaexpert job.
-type LinkMediaExpertSummary struct {
-	Processed          int   `json:"processed"`
-	Linked             int   `json:"linked"`
-	SkippedLowScore    int   `json:"skipped_low_score"`
-	SkippedMfrMismatch int   `json:"skipped_mfr_mismatch"`
-	NoSearchHits       int   `json:"no_search_hits"`
-	Errors             int   `json:"errors"`
-	DryRun             bool  `json:"dry_run"`
-	Probe              bool  `json:"probe"`
-	DurationMs         int64 `json:"duration_ms"`
-}
 
 // mediaExpertAbsoluteURL turns a Synerise link field into an absolute product URL.
 func mediaExpertAbsoluteURL(link string) string {
@@ -194,9 +180,9 @@ func mediaExpertTargetStoreSlugInDB(app *App) (slug string, store *Store, err er
 	return "", nil, errors.New("no Media Expert store row (tried slugs mediaexpert, media-expert)")
 }
 
-func (app *App) runLinkMediaExpert(sourceStoreSlug, productCategory string, limit int, minScore float64, maxSearchHits int, dryRun, probe bool) LinkMediaExpertSummary {
+func (app *App) runLinkMediaExpert(sourceStoreSlug, productCategory string, limit int, minScore float64, maxSearchHits int, dryRun, probe bool) LinkSummary {
 	start := time.Now()
-	sum := LinkMediaExpertSummary{DryRun: dryRun, Probe: probe}
+	sum := LinkSummary{DryRun: dryRun, Probe: probe}
 
 	targetSlug, meStore, err := mediaExpertTargetStoreSlugInDB(app)
 	if err != nil {
@@ -287,29 +273,7 @@ func (app *App) runLinkMediaExpert(sourceStoreSlug, productCategory string, limi
 			continue
 		}
 
-		if want := manufacturerCodeForLinking(pr.ManufacturerCode); want != "" {
-			got := strings.TrimSpace(scraped.ManufacturerCode)
-			if got != "" && !manufacturerCodesCompatible(want, got) {
-				sum.SkippedMfrMismatch++
-				log.Printf("[link/mediaexpert] product %d: MPN mismatch ours=%q mediaexpert=%q — skip", pr.ID, want, got)
-				continue
-			}
-		}
-
-		newPrice := math.Round(scraped.Price*100) / 100
-		currency := scraped.Currency
-		if currency == "" {
-			currency = "PLN"
-		}
-
-		if err := app.db.UpsertPriceForProduct(pr.ID, meStore.ID, newPrice, currency, productURL, scraped.IsAvailable); err != nil {
-			log.Printf("[link/mediaexpert] upsert price product %d: %v", pr.ID, err)
-			sum.Errors++
-			continue
-		}
-
-		sum.Linked++
-		log.Printf("[link/mediaexpert] product %d: linked score=%.3f price=%.2f %s url=%s", pr.ID, score, newPrice, currency, productURL)
+		linkVerifyAndUpsert(app, &sum, "mediaexpert", pr, meStore.ID, scraped, productURL, score)
 	}
 
 	sum.DurationMs = time.Since(start).Milliseconds()

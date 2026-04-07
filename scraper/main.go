@@ -7,7 +7,6 @@ import (
 	"net/http"
 	"strconv"
 	"strings"
-	"sync"
 	"time"
 )
 
@@ -16,18 +15,12 @@ type App struct {
 	db              *DB
 	registry        *ScraperRegistry
 	crawlerRegistry *CrawlerRegistry
-	mu              sync.Mutex
-	running         bool
-	crawlMu         sync.Mutex
-	crawlRunning    bool
-	linkMoreleMu         sync.Mutex
-	linkMoreleRunning    bool
-	linkMediaExpertMu    sync.Mutex
-	linkMediaExpertRunning bool
-	linkAmazonMu         sync.Mutex
-	linkAmazonRunning    bool
-	enrichMu        sync.Mutex
-	enrichRunning   bool
+	scrapeGuard     jobGuard
+	crawlGuard      jobGuard
+	linkMoreleGuard jobGuard
+	linkMEGuard     jobGuard
+	linkAmazonGuard jobGuard
+	enrichGuard     jobGuard
 }
 
 // linkParams holds the common query parameters shared by all /link/* handlers.
@@ -119,9 +112,9 @@ func main() {
 	mux.HandleFunc("/scrape/", app.handleScrapeStore)
 	mux.HandleFunc("/crawl", app.handleCrawl)
 	mux.HandleFunc("/crawl/", app.handleCrawlStore)
-	mux.HandleFunc("/link/morele", app.handleLinkMorele)
-	mux.HandleFunc("/link/mediaexpert", app.handleLinkMediaExpert)
-	mux.HandleFunc("/link/amazon", app.handleLinkAmazon)
+	mux.HandleFunc("/link/morele", app.handleLink("morele", 0.32, &app.linkMoreleGuard, app.runLinkMorele))
+	mux.HandleFunc("/link/mediaexpert", app.handleLink("mediaexpert", 0.32, &app.linkMEGuard, app.runLinkMediaExpert))
+	mux.HandleFunc("/link/amazon", app.handleLink("amazon", 0.40, &app.linkAmazonGuard, app.runLinkAmazon))
 	mux.HandleFunc("/enrich/x-kom-manufacturer-code", app.handleEnrichXKOMManufacturer)
 
 	log.Printf("Scraper listening on :%s", cfg.Port)
@@ -146,13 +139,13 @@ func (app *App) handleScrape(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if !app.tryStartScrape() {
+	if !app.scrapeGuard.tryStart() {
 		writeJSON(w, http.StatusConflict, map[string]string{"error": "scrape already in progress"})
 		return
 	}
 
 	go func() {
-		defer app.finishScrape()
+		defer app.scrapeGuard.finish()
 		results := app.scrapeAllStores()
 		log.Printf("Scrape all completed: %+v", results)
 	}()
@@ -179,13 +172,13 @@ func (app *App) handleScrapeStore(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if !app.tryStartScrape() {
+	if !app.scrapeGuard.tryStart() {
 		writeJSON(w, http.StatusConflict, map[string]string{"error": "scrape already in progress"})
 		return
 	}
 
 	go func() {
-		defer app.finishScrape()
+		defer app.scrapeGuard.finish()
 		result := app.scrapeStore(storeSlug)
 		log.Printf("Scrape %s completed: %+v", storeSlug, result)
 	}()
@@ -281,21 +274,6 @@ func (app *App) scrapeStore(storeSlug string) ScrapeStoreResult {
 	return result
 }
 
-func (app *App) tryStartScrape() bool {
-	app.mu.Lock()
-	defer app.mu.Unlock()
-	if app.running {
-		return false
-	}
-	app.running = true
-	return true
-}
-
-func (app *App) finishScrape() {
-	app.mu.Lock()
-	defer app.mu.Unlock()
-	app.running = false
-}
 
 // handleScrapeTest scrapes a single URL without touching the database.
 // GET /scrape/test?url=https://www.x-kom.pl/p/1222893-sluchawki-bezprzewodowe-soundpeats-air-4-pro-czarne.html
@@ -361,13 +339,13 @@ func (app *App) handleCrawl(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if !app.tryStartCrawl() {
+	if !app.crawlGuard.tryStart() {
 		writeJSON(w, http.StatusConflict, map[string]string{"error": "crawl already in progress"})
 		return
 	}
 
 	go func() {
-		defer app.finishCrawl()
+		defer app.crawlGuard.finish()
 		var allResults []CrawlCategoryResult
 		for _, slug := range app.crawlerRegistry.RegisteredSlugs() {
 			results := app.crawlStoreAllCategories(slug, defaultCrawlMaxPages)
@@ -402,7 +380,7 @@ func (app *App) handleCrawlStore(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if !app.tryStartCrawl() {
+	if !app.crawlGuard.tryStart() {
 		writeJSON(w, http.StatusConflict, map[string]string{"error": "crawl already in progress"})
 		return
 	}
@@ -418,7 +396,7 @@ func (app *App) handleCrawlStore(w http.ResponseWriter, r *http.Request) {
 	customURL := r.URL.Query().Get("url")
 
 	go func() {
-		defer app.finishCrawl()
+		defer app.crawlGuard.finish()
 
 		var results []CrawlCategoryResult
 		if customURL != "" {
@@ -450,21 +428,6 @@ func (app *App) handleCrawlStore(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
-func (app *App) tryStartCrawl() bool {
-	app.crawlMu.Lock()
-	defer app.crawlMu.Unlock()
-	if app.crawlRunning {
-		return false
-	}
-	app.crawlRunning = true
-	return true
-}
-
-func (app *App) finishCrawl() {
-	app.crawlMu.Lock()
-	defer app.crawlMu.Unlock()
-	app.crawlRunning = false
-}
 
 // crawlStoreAllCategories crawls every default category for the given store.
 func (app *App) crawlStoreAllCategories(storeSlug string, maxPages int) []CrawlCategoryResult {
@@ -592,198 +555,54 @@ func writeJSON(w http.ResponseWriter, status int, v interface{}) {
 	json.NewEncoder(w).Encode(v)
 }
 
-// handleLinkMorele matches DB products (with source store price, without Morele) to Morele via search.
-// POST /link/morele
-// Query: source (default x-kom), limit (default 20; use limit=0 for all matching products),
-// min_score (default 0.32), max_candidates (default 25),
-// dry_run (default true; pass dry_run=false to write prices),
-// probe (pass probe=true for zero request delay on search + Morele scrape — use only for small tests),
-// category (optional; crawler key e.g. cpu — only products with this products.category).
-// Search order: manufacturer_code (if set) first, then product title — Morele /wyszukiwarka/.
-// Search pacing uses MORELE_SEARCH_DELAY_MS (default 0), not REQUEST_DELAY_MS, so link jobs stay fast.
-func (app *App) handleLinkMorele(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodPost {
-		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
-		return
+// linkRunner is the signature shared by runLinkMorele, runLinkMediaExpert, and runLinkAmazon.
+type linkRunner func(sourceStoreSlug, category string, limit int, minScore float64, maxHits int, dryRun, probe bool) LinkSummary
+
+// handleLink returns a handler for POST /link/{store}.
+// All link endpoints share the same request validation, mutex guarding, and response shape.
+func (app *App) handleLink(storeName string, defaultMinScore float64, guard *jobGuard, runner linkRunner) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost {
+			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+			return
+		}
+
+		p := parseLinkParams(r, defaultMinScore)
+
+		if len(p.Category) > 50 {
+			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "category too long (max 50)"})
+			return
+		}
+
+		if _, err := app.db.GetStoreBySlug(p.SourceStore); err != nil {
+			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "unknown source store: " + p.SourceStore})
+			return
+		}
+
+		if !guard.tryStart() {
+			writeJSON(w, http.StatusConflict, map[string]string{"error": "link " + storeName + " job already in progress"})
+			return
+		}
+
+		go func() {
+			defer guard.finish()
+			sum := runner(p.SourceStore, p.Category, p.Limit, p.MinScore, p.MaxCandidates, p.DryRun, p.Probe)
+			log.Printf("[link/%s] completed: %+v", storeName, sum)
+		}()
+
+		resp := map[string]any{
+			"status":    "link " + storeName + " started",
+			"source":    p.SourceStore,
+			"limit":     p.Limit,
+			"min_score": p.MinScore,
+			"dry_run":   p.DryRun,
+			"probe":     p.Probe,
+		}
+		if p.Category != "" {
+			resp["category"] = p.Category
+		}
+		writeJSON(w, http.StatusAccepted, resp)
 	}
-
-	p := parseLinkParams(r, 0.32)
-
-	if len(p.Category) > 50 {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "category too long (max 50)"})
-		return
-	}
-
-	if _, err := app.db.GetStoreBySlug(p.SourceStore); err != nil {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "unknown source store: " + p.SourceStore})
-		return
-	}
-
-	if !app.tryStartLinkMorele() {
-		writeJSON(w, http.StatusConflict, map[string]string{"error": "link morele job already in progress"})
-		return
-	}
-
-	go func() {
-		defer app.finishLinkMorele()
-		sum := app.runLinkMorele(p.SourceStore, p.Category, p.Limit, p.MinScore, p.MaxCandidates, p.DryRun, p.Probe)
-		log.Printf("[link/morele] completed: %+v", sum)
-	}()
-
-	resp := map[string]interface{}{
-		"status":    "link morele started",
-		"source":    p.SourceStore,
-		"limit":     p.Limit,
-		"min_score": p.MinScore,
-		"dry_run":   p.DryRun,
-		"probe":     p.Probe,
-	}
-	if p.Category != "" {
-		resp["category"] = p.Category
-	}
-	writeJSON(w, http.StatusAccepted, resp)
-}
-
-// handleLinkMediaExpert matches DB products (with source store price, without Media Expert) via Synerise search.
-// POST /link/mediaexpert
-// Query: same as /link/morele — source, limit (0 = all matching), min_score, max_candidates, dry_run, probe, category.
-// Search order: manufacturer_code first, then title (same as Morele). One JSON search API call per query attempt; no extra product page fetch.
-func (app *App) handleLinkMediaExpert(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodPost {
-		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
-		return
-	}
-
-	p := parseLinkParams(r, 0.32)
-
-	if len(p.Category) > 50 {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "category too long (max 50)"})
-		return
-	}
-
-	if _, err := app.db.GetStoreBySlug(p.SourceStore); err != nil {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "unknown source store: " + p.SourceStore})
-		return
-	}
-
-	if !app.tryStartLinkMediaExpert() {
-		writeJSON(w, http.StatusConflict, map[string]string{"error": "link mediaexpert job already in progress"})
-		return
-	}
-
-	go func() {
-		defer app.finishLinkMediaExpert()
-		sum := app.runLinkMediaExpert(p.SourceStore, p.Category, p.Limit, p.MinScore, p.MaxCandidates, p.DryRun, p.Probe)
-		log.Printf("[link/mediaexpert] completed: %+v", sum)
-	}()
-
-	resp := map[string]interface{}{
-		"status":    "link mediaexpert started",
-		"source":    p.SourceStore,
-		"limit":     p.Limit,
-		"min_score": p.MinScore,
-		"dry_run":   p.DryRun,
-		"probe":     p.Probe,
-	}
-	if p.Category != "" {
-		resp["category"] = p.Category
-	}
-	writeJSON(w, http.StatusAccepted, resp)
-}
-
-// handleLinkAmazon matches DB products (with source store price, without Amazon.pl) via search HTML.
-// POST /link/amazon
-// Query: same as /link/morele — source, limit, min_score, max_candidates, dry_run, probe, category.
-// Amazon default min_score is stricter (0.40): search is noisy and MPN queries return many unrelated ASINs.
-func (app *App) handleLinkAmazon(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodPost {
-		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
-		return
-	}
-
-	p := parseLinkParams(r, 0.40)
-
-	if len(p.Category) > 50 {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "category too long (max 50)"})
-		return
-	}
-
-	if _, err := app.db.GetStoreBySlug(p.SourceStore); err != nil {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "unknown source store: " + p.SourceStore})
-		return
-	}
-
-	if !app.tryStartLinkAmazon() {
-		writeJSON(w, http.StatusConflict, map[string]string{"error": "link amazon job already in progress"})
-		return
-	}
-
-	go func() {
-		defer app.finishLinkAmazon()
-		sum := app.runLinkAmazon(p.SourceStore, p.Category, p.Limit, p.MinScore, p.MaxCandidates, p.DryRun, p.Probe)
-		log.Printf("[link/amazon] completed: %+v", sum)
-	}()
-
-	resp := map[string]interface{}{
-		"status":    "link amazon started",
-		"source":    p.SourceStore,
-		"limit":     p.Limit,
-		"min_score": p.MinScore,
-		"dry_run":   p.DryRun,
-		"probe":     p.Probe,
-	}
-	if p.Category != "" {
-		resp["category"] = p.Category
-	}
-	writeJSON(w, http.StatusAccepted, resp)
-}
-
-func (app *App) tryStartLinkMorele() bool {
-	app.linkMoreleMu.Lock()
-	defer app.linkMoreleMu.Unlock()
-	if app.linkMoreleRunning {
-		return false
-	}
-	app.linkMoreleRunning = true
-	return true
-}
-
-func (app *App) finishLinkMorele() {
-	app.linkMoreleMu.Lock()
-	defer app.linkMoreleMu.Unlock()
-	app.linkMoreleRunning = false
-}
-
-func (app *App) tryStartLinkMediaExpert() bool {
-	app.linkMediaExpertMu.Lock()
-	defer app.linkMediaExpertMu.Unlock()
-	if app.linkMediaExpertRunning {
-		return false
-	}
-	app.linkMediaExpertRunning = true
-	return true
-}
-
-func (app *App) finishLinkMediaExpert() {
-	app.linkMediaExpertMu.Lock()
-	defer app.linkMediaExpertMu.Unlock()
-	app.linkMediaExpertRunning = false
-}
-
-func (app *App) tryStartLinkAmazon() bool {
-	app.linkAmazonMu.Lock()
-	defer app.linkAmazonMu.Unlock()
-	if app.linkAmazonRunning {
-		return false
-	}
-	app.linkAmazonRunning = true
-	return true
-}
-
-func (app *App) finishLinkAmazon() {
-	app.linkAmazonMu.Lock()
-	defer app.linkAmazonMu.Unlock()
-	app.linkAmazonRunning = false
 }
 
 // handleEnrichXKOMManufacturer scrapes x-kom product pages and saves manufacturer_code (MPN) on products.
@@ -816,13 +635,13 @@ func (app *App) handleEnrichXKOMManufacturer(w http.ResponseWriter, r *http.Requ
 
 	probe := r.URL.Query().Get("probe") == "true" || r.URL.Query().Get("probe") == "1"
 
-	if !app.tryStartEnrich() {
+	if !app.enrichGuard.tryStart() {
 		writeJSON(w, http.StatusConflict, map[string]string{"error": "enrich job already in progress"})
 		return
 	}
 
 	go func() {
-		defer app.finishEnrich()
+		defer app.enrichGuard.finish()
 		sum := app.runEnrichXKOMManufacturer(onlyMissing, category, limit, probe)
 		log.Printf("[enrich/x-kom-mfr] completed: %+v", sum)
 	}()
@@ -839,18 +658,3 @@ func (app *App) handleEnrichXKOMManufacturer(w http.ResponseWriter, r *http.Requ
 	writeJSON(w, http.StatusAccepted, resp)
 }
 
-func (app *App) tryStartEnrich() bool {
-	app.enrichMu.Lock()
-	defer app.enrichMu.Unlock()
-	if app.enrichRunning {
-		return false
-	}
-	app.enrichRunning = true
-	return true
-}
-
-func (app *App) finishEnrich() {
-	app.enrichMu.Lock()
-	defer app.enrichMu.Unlock()
-	app.enrichRunning = false
-}
