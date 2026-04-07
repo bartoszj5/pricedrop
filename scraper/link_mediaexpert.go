@@ -237,7 +237,7 @@ func (app *App) runLinkMediaExpert(sourceStoreSlug, productCategory string, limi
 
 	for _, pr := range products {
 		sum.Processed++
-		queries := moreleSearchQueriesForProduct(sourceStoreSlug, pr)
+		queries := searchQueriesForProduct(sourceStoreSlug, pr)
 		if len(queries) == 0 {
 			sum.Errors++
 			continue

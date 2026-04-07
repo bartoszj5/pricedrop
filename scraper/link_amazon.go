@@ -71,7 +71,7 @@ func (app *App) runLinkAmazon(sourceStoreSlug, productCategory string, limit int
 
 	for _, pr := range products {
 		sum.Processed++
-		queries := moreleSearchQueriesForProduct(sourceStoreSlug, pr)
+		queries := searchQueriesForProduct(sourceStoreSlug, pr)
 		if len(queries) == 0 {
 			sum.Errors++
 			continue

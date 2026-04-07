@@ -20,15 +20,15 @@ type ProductToLink struct {
 
 // LinkMoreleSummary is returned after a link-morele job.
 type LinkMoreleSummary struct {
-	Processed           int `json:"processed"`
-	Linked              int `json:"linked"`
-	SkippedLowScore     int `json:"skipped_low_score"`
-	SkippedMfrMismatch  int `json:"skipped_mfr_mismatch"`
-	NoSearchHits        int `json:"no_search_hits"`
-	Errors              int `json:"errors"`
-	DryRun          bool `json:"dry_run"`
-	Probe           bool `json:"probe"`
-	DurationMs      int64 `json:"duration_ms"`
+	Processed          int   `json:"processed"`
+	Linked             int   `json:"linked"`
+	SkippedLowScore    int   `json:"skipped_low_score"`
+	SkippedMfrMismatch int   `json:"skipped_mfr_mismatch"`
+	NoSearchHits       int   `json:"no_search_hits"`
+	Errors             int   `json:"errors"`
+	DryRun             bool  `json:"dry_run"`
+	Probe              bool  `json:"probe"`
+	DurationMs         int64 `json:"duration_ms"`
 }
 
 var stripTitleNoise = strings.NewReplacer(
@@ -106,7 +106,7 @@ func manufacturerCodeForLinking(code string) string {
 	return strings.TrimSpace(code)
 }
 
-func moreleSearchQueriesForProduct(sourceStoreSlug string, pr ProductToLink) []string {
+func searchQueriesForProduct(sourceStoreSlug string, pr ProductToLink) []string {
 	seen := make(map[string]struct{})
 	var out []string
 	add := func(q string) {
@@ -287,7 +287,7 @@ func (app *App) runLinkMorele(sourceStoreSlug, productCategory string, limit int
 
 	for _, pr := range products {
 		sum.Processed++
-		queries := moreleSearchQueriesForProduct(sourceStoreSlug, pr)
+		queries := searchQueriesForProduct(sourceStoreSlug, pr)
 		if len(queries) == 0 {
 			sum.Errors++
 			continue

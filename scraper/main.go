@@ -20,10 +20,67 @@ type App struct {
 	running         bool
 	crawlMu         sync.Mutex
 	crawlRunning    bool
-	linkMu          sync.Mutex
-	linkRunning     bool
+	linkMoreleMu         sync.Mutex
+	linkMoreleRunning    bool
+	linkMediaExpertMu    sync.Mutex
+	linkMediaExpertRunning bool
+	linkAmazonMu         sync.Mutex
+	linkAmazonRunning    bool
 	enrichMu        sync.Mutex
 	enrichRunning   bool
+}
+
+// linkParams holds the common query parameters shared by all /link/* handlers.
+type linkParams struct {
+	DryRun        bool
+	Probe         bool
+	Limit         int
+	MinScore      float64
+	MaxCandidates int
+	SourceStore   string
+	Category      string
+}
+
+// parseLinkParams extracts the common link query parameters from a request.
+// defaultMinScore allows per-store overrides (e.g. Amazon uses 0.40).
+func parseLinkParams(r *http.Request, defaultMinScore float64) linkParams {
+	p := linkParams{
+		DryRun:        r.URL.Query().Get("dry_run") != "false",
+		Probe:         r.URL.Query().Get("probe") == "true" || r.URL.Query().Get("probe") == "1",
+		Limit:         20,
+		MinScore:      defaultMinScore,
+		MaxCandidates: 25,
+		SourceStore:   "x-kom",
+	}
+
+	if v := r.URL.Query().Get("limit"); v != "" {
+		if n, err := strconv.Atoi(v); err == nil {
+			if n == 0 {
+				p.Limit = 0
+			} else if n > 0 {
+				p.Limit = n
+			}
+		}
+	}
+
+	if v := r.URL.Query().Get("min_score"); v != "" {
+		if f, err := strconv.ParseFloat(v, 64); err == nil && f >= 0 && f <= 1 {
+			p.MinScore = f
+		}
+	}
+
+	if v := r.URL.Query().Get("max_candidates"); v != "" {
+		if n, err := strconv.Atoi(v); err == nil && n > 0 {
+			p.MaxCandidates = n
+		}
+	}
+
+	if src := strings.TrimSpace(r.URL.Query().Get("source")); src != "" {
+		p.SourceStore = src
+	}
+
+	p.Category = strings.TrimSpace(r.URL.Query().Get("category"))
+	return p
 }
 
 func main() {
@@ -550,71 +607,39 @@ func (app *App) handleLinkMorele(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	dryRun := r.URL.Query().Get("dry_run") != "false"
-	probe := r.URL.Query().Get("probe") == "true" || r.URL.Query().Get("probe") == "1"
+	p := parseLinkParams(r, 0.32)
 
-	limit := 20
-	if v := r.URL.Query().Get("limit"); v != "" {
-		if n, err := strconv.Atoi(v); err == nil {
-			if n == 0 {
-				limit = 0
-			} else if n > 0 {
-				limit = n
-			}
-		}
-	}
-
-	minScore := 0.32
-	if v := r.URL.Query().Get("min_score"); v != "" {
-		if f, err := strconv.ParseFloat(v, 64); err == nil && f >= 0 && f <= 1 {
-			minScore = f
-		}
-	}
-
-	maxCandidates := 25
-	if v := r.URL.Query().Get("max_candidates"); v != "" {
-		if n, err := strconv.Atoi(v); err == nil && n > 0 {
-			maxCandidates = n
-		}
-	}
-
-	sourceStore := strings.TrimSpace(r.URL.Query().Get("source"))
-	if sourceStore == "" {
-		sourceStore = "x-kom"
-	}
-
-	category := strings.TrimSpace(r.URL.Query().Get("category"))
-	if len(category) > 50 {
+	if len(p.Category) > 50 {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "category too long (max 50)"})
 		return
 	}
 
-	if _, err := app.db.GetStoreBySlug(sourceStore); err != nil {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "unknown source store: " + sourceStore})
+	if _, err := app.db.GetStoreBySlug(p.SourceStore); err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "unknown source store: " + p.SourceStore})
 		return
 	}
 
-	if !app.tryStartLink() {
-		writeJSON(w, http.StatusConflict, map[string]string{"error": "link job already in progress"})
+	if !app.tryStartLinkMorele() {
+		writeJSON(w, http.StatusConflict, map[string]string{"error": "link morele job already in progress"})
 		return
 	}
 
 	go func() {
-		defer app.finishLink()
-		sum := app.runLinkMorele(sourceStore, category, limit, minScore, maxCandidates, dryRun, probe)
+		defer app.finishLinkMorele()
+		sum := app.runLinkMorele(p.SourceStore, p.Category, p.Limit, p.MinScore, p.MaxCandidates, p.DryRun, p.Probe)
 		log.Printf("[link/morele] completed: %+v", sum)
 	}()
 
 	resp := map[string]interface{}{
 		"status":    "link morele started",
-		"source":    sourceStore,
-		"limit":     limit,
-		"min_score": minScore,
-		"dry_run":   dryRun,
-		"probe":     probe,
+		"source":    p.SourceStore,
+		"limit":     p.Limit,
+		"min_score": p.MinScore,
+		"dry_run":   p.DryRun,
+		"probe":     p.Probe,
 	}
-	if category != "" {
-		resp["category"] = category
+	if p.Category != "" {
+		resp["category"] = p.Category
 	}
 	writeJSON(w, http.StatusAccepted, resp)
 }
@@ -629,71 +654,39 @@ func (app *App) handleLinkMediaExpert(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	dryRun := r.URL.Query().Get("dry_run") != "false"
-	probe := r.URL.Query().Get("probe") == "true" || r.URL.Query().Get("probe") == "1"
+	p := parseLinkParams(r, 0.32)
 
-	limit := 20
-	if v := r.URL.Query().Get("limit"); v != "" {
-		if n, err := strconv.Atoi(v); err == nil {
-			if n == 0 {
-				limit = 0
-			} else if n > 0 {
-				limit = n
-			}
-		}
-	}
-
-	minScore := 0.32
-	if v := r.URL.Query().Get("min_score"); v != "" {
-		if f, err := strconv.ParseFloat(v, 64); err == nil && f >= 0 && f <= 1 {
-			minScore = f
-		}
-	}
-
-	maxCandidates := 25
-	if v := r.URL.Query().Get("max_candidates"); v != "" {
-		if n, err := strconv.Atoi(v); err == nil && n > 0 {
-			maxCandidates = n
-		}
-	}
-
-	sourceStore := strings.TrimSpace(r.URL.Query().Get("source"))
-	if sourceStore == "" {
-		sourceStore = "x-kom"
-	}
-
-	category := strings.TrimSpace(r.URL.Query().Get("category"))
-	if len(category) > 50 {
+	if len(p.Category) > 50 {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "category too long (max 50)"})
 		return
 	}
 
-	if _, err := app.db.GetStoreBySlug(sourceStore); err != nil {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "unknown source store: " + sourceStore})
+	if _, err := app.db.GetStoreBySlug(p.SourceStore); err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "unknown source store: " + p.SourceStore})
 		return
 	}
 
-	if !app.tryStartLink() {
-		writeJSON(w, http.StatusConflict, map[string]string{"error": "link job already in progress"})
+	if !app.tryStartLinkMediaExpert() {
+		writeJSON(w, http.StatusConflict, map[string]string{"error": "link mediaexpert job already in progress"})
 		return
 	}
 
 	go func() {
-		defer app.finishLink()
-		sum := app.runLinkMediaExpert(sourceStore, category, limit, minScore, maxCandidates, dryRun, probe)
+		defer app.finishLinkMediaExpert()
+		sum := app.runLinkMediaExpert(p.SourceStore, p.Category, p.Limit, p.MinScore, p.MaxCandidates, p.DryRun, p.Probe)
 		log.Printf("[link/mediaexpert] completed: %+v", sum)
 	}()
 
 	resp := map[string]interface{}{
 		"status":    "link mediaexpert started",
-		"source":    sourceStore,
-		"limit":     limit,
-		"min_score": minScore,
-		"dry_run":   dryRun,
-		"probe":     probe,
+		"source":    p.SourceStore,
+		"limit":     p.Limit,
+		"min_score": p.MinScore,
+		"dry_run":   p.DryRun,
+		"probe":     p.Probe,
 	}
-	if category != "" {
-		resp["category"] = category
+	if p.Category != "" {
+		resp["category"] = p.Category
 	}
 	writeJSON(w, http.StatusAccepted, resp)
 }
@@ -701,96 +694,96 @@ func (app *App) handleLinkMediaExpert(w http.ResponseWriter, r *http.Request) {
 // handleLinkAmazon matches DB products (with source store price, without Amazon.pl) via search HTML.
 // POST /link/amazon
 // Query: same as /link/morele — source, limit, min_score, max_candidates, dry_run, probe, category.
+// Amazon default min_score is stricter (0.40): search is noisy and MPN queries return many unrelated ASINs.
 func (app *App) handleLinkAmazon(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 		return
 	}
 
-	dryRun := r.URL.Query().Get("dry_run") != "false"
-	probe := r.URL.Query().Get("probe") == "true" || r.URL.Query().Get("probe") == "1"
+	p := parseLinkParams(r, 0.40)
 
-	limit := 20
-	if v := r.URL.Query().Get("limit"); v != "" {
-		if n, err := strconv.Atoi(v); err == nil {
-			if n == 0 {
-				limit = 0
-			} else if n > 0 {
-				limit = n
-			}
-		}
-	}
-
-	// Amazon default is stricter than Morele/Media Expert: search is noisy and MPN queries return many unrelated ASINs.
-	minScore := 0.40
-	if v := r.URL.Query().Get("min_score"); v != "" {
-		if f, err := strconv.ParseFloat(v, 64); err == nil && f >= 0 && f <= 1 {
-			minScore = f
-		}
-	}
-
-	maxCandidates := 25
-	if v := r.URL.Query().Get("max_candidates"); v != "" {
-		if n, err := strconv.Atoi(v); err == nil && n > 0 {
-			maxCandidates = n
-		}
-	}
-
-	sourceStore := strings.TrimSpace(r.URL.Query().Get("source"))
-	if sourceStore == "" {
-		sourceStore = "x-kom"
-	}
-
-	category := strings.TrimSpace(r.URL.Query().Get("category"))
-	if len(category) > 50 {
+	if len(p.Category) > 50 {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "category too long (max 50)"})
 		return
 	}
 
-	if _, err := app.db.GetStoreBySlug(sourceStore); err != nil {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "unknown source store: " + sourceStore})
+	if _, err := app.db.GetStoreBySlug(p.SourceStore); err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "unknown source store: " + p.SourceStore})
 		return
 	}
 
-	if !app.tryStartLink() {
-		writeJSON(w, http.StatusConflict, map[string]string{"error": "link job already in progress"})
+	if !app.tryStartLinkAmazon() {
+		writeJSON(w, http.StatusConflict, map[string]string{"error": "link amazon job already in progress"})
 		return
 	}
 
 	go func() {
-		defer app.finishLink()
-		sum := app.runLinkAmazon(sourceStore, category, limit, minScore, maxCandidates, dryRun, probe)
+		defer app.finishLinkAmazon()
+		sum := app.runLinkAmazon(p.SourceStore, p.Category, p.Limit, p.MinScore, p.MaxCandidates, p.DryRun, p.Probe)
 		log.Printf("[link/amazon] completed: %+v", sum)
 	}()
 
 	resp := map[string]interface{}{
 		"status":    "link amazon started",
-		"source":    sourceStore,
-		"limit":     limit,
-		"min_score": minScore,
-		"dry_run":   dryRun,
-		"probe":     probe,
+		"source":    p.SourceStore,
+		"limit":     p.Limit,
+		"min_score": p.MinScore,
+		"dry_run":   p.DryRun,
+		"probe":     p.Probe,
 	}
-	if category != "" {
-		resp["category"] = category
+	if p.Category != "" {
+		resp["category"] = p.Category
 	}
 	writeJSON(w, http.StatusAccepted, resp)
 }
 
-func (app *App) tryStartLink() bool {
-	app.linkMu.Lock()
-	defer app.linkMu.Unlock()
-	if app.linkRunning {
+func (app *App) tryStartLinkMorele() bool {
+	app.linkMoreleMu.Lock()
+	defer app.linkMoreleMu.Unlock()
+	if app.linkMoreleRunning {
 		return false
 	}
-	app.linkRunning = true
+	app.linkMoreleRunning = true
 	return true
 }
 
-func (app *App) finishLink() {
-	app.linkMu.Lock()
-	defer app.linkMu.Unlock()
-	app.linkRunning = false
+func (app *App) finishLinkMorele() {
+	app.linkMoreleMu.Lock()
+	defer app.linkMoreleMu.Unlock()
+	app.linkMoreleRunning = false
+}
+
+func (app *App) tryStartLinkMediaExpert() bool {
+	app.linkMediaExpertMu.Lock()
+	defer app.linkMediaExpertMu.Unlock()
+	if app.linkMediaExpertRunning {
+		return false
+	}
+	app.linkMediaExpertRunning = true
+	return true
+}
+
+func (app *App) finishLinkMediaExpert() {
+	app.linkMediaExpertMu.Lock()
+	defer app.linkMediaExpertMu.Unlock()
+	app.linkMediaExpertRunning = false
+}
+
+func (app *App) tryStartLinkAmazon() bool {
+	app.linkAmazonMu.Lock()
+	defer app.linkAmazonMu.Unlock()
+	if app.linkAmazonRunning {
+		return false
+	}
+	app.linkAmazonRunning = true
+	return true
+}
+
+func (app *App) finishLinkAmazon() {
+	app.linkAmazonMu.Lock()
+	defer app.linkAmazonMu.Unlock()
+	app.linkAmazonRunning = false
 }
 
 // handleEnrichXKOMManufacturer scrapes x-kom product pages and saves manufacturer_code (MPN) on products.
