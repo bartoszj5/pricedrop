@@ -20,12 +20,20 @@ export default function RegisterPage() {
     e.preventDefault();
     setError(null);
 
+    if (username.length < 3 || username.length > 100) {
+      setError("Nazwa uzytkownika musi miec od 3 do 100 znakow");
+      return;
+    }
+    if (!/^[a-zA-Z0-9_-]+$/.test(username)) {
+      setError("Nazwa uzytkownika moze zawierac tylko litery, cyfry, myslniki i podkreslenia");
+      return;
+    }
     if (password !== confirmPassword) {
       setError("Hasla nie sa identyczne");
       return;
     }
-    if (password.length < 6) {
-      setError("Haslo musi miec co najmniej 6 znakow");
+    if (password.length < 8) {
+      setError("Haslo musi miec co najmniej 8 znakow");
       return;
     }
 
@@ -67,6 +75,9 @@ export default function RegisterPage() {
             <input
               type="text"
               required
+              minLength={3}
+              maxLength={100}
+              pattern="[a-zA-Z0-9_\-]+"
               autoComplete="username"
               value={username}
               onChange={(e) => setUsername(e.target.value)}
@@ -101,7 +112,7 @@ export default function RegisterPage() {
               value={password}
               onChange={(e) => setPassword(e.target.value)}
               className="rounded-2xl border border-border bg-bg-card px-4 py-3 text-text-primary placeholder:text-text-muted/60 focus:border-accent/50 focus:outline-none focus:ring-2 focus:ring-accent/20"
-              placeholder="Min. 6 znakow"
+              placeholder="Min. 8 znakow"
             />
           </label>
 

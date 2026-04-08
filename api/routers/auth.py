@@ -3,7 +3,9 @@ from typing import Annotated
 
 from fastapi import APIRouter, Depends, HTTPException, status
 from fastapi.security import OAuth2PasswordRequestForm
-from pydantic import BaseModel, EmailStr
+import re
+
+from pydantic import BaseModel, EmailStr, Field, field_validator
 from sqlmodel import Session, select
 
 from dependencies.auth import (
@@ -28,9 +30,25 @@ class Token(BaseModel):
 
 
 class UserRegister(BaseModel):
-    username: str
+    username: str = Field(min_length=3, max_length=100)
     email: EmailStr
     password: str
+
+    @field_validator("username")
+    @classmethod
+    def username_valid_chars(cls, v: str) -> str:
+        if not re.fullmatch(r"[a-zA-Z0-9_-]+", v):
+            raise ValueError(
+                "Username may only contain letters, digits, hyphens, and underscores"
+            )
+        return v
+
+    @field_validator("password")
+    @classmethod
+    def password_min_length(cls, v: str) -> str:
+        if len(v) < 8:
+            raise ValueError("Password must be at least 8 characters")
+        return v
 
 
 class UserResponse(BaseModel):
