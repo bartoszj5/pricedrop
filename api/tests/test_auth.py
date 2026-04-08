@@ -144,12 +144,48 @@ def test_me_requires_auth(client: TestClient):
     assert resp.status_code == 401
 
 
+def test_login_sets_refresh_cookie(client: TestClient):
+    _register(client)
+    resp = _login(client)
+    assert "refresh_token" in resp.cookies
+
+
+def test_refresh_issues_new_access_token(client: TestClient):
+    _register(client)
+    resp = _login(client)
+    refresh_cookie = resp.cookies["refresh_token"]
+    resp = client.post("/auth/refresh", cookies={"refresh_token": refresh_cookie})
+    assert resp.status_code == 200
+    assert "access_token" in resp.json()
+    assert resp.json()["token_type"] == "bearer"
+
+
+def test_refresh_without_cookie_returns_401(client: TestClient):
+    resp = client.post("/auth/refresh")
+    assert resp.status_code == 401
+
+
+def test_refresh_with_invalid_token_returns_401(client: TestClient):
+    resp = client.post("/auth/refresh", cookies={"refresh_token": "invalid.token.here"})
+    assert resp.status_code == 401
+
+
+def test_refresh_with_access_token_as_refresh_returns_401(client: TestClient):
+    _register(client)
+    resp = _login(client)
+    access_token = resp.cookies["access_token"]
+    resp = client.post("/auth/refresh", cookies={"refresh_token": access_token})
+    assert resp.status_code == 401
+
+
 def test_logout_clears_cookie(client: TestClient):
     _register(client)
     _login(client)
     resp = client.post("/auth/logout")
     assert resp.status_code == 200
-    assert resp.cookies.get("access_token") == '""' or "access_token" in resp.headers.get("set-cookie", "")
+    set_cookie_header = resp.headers.get("set-cookie", "")
+    assert "access_token" in set_cookie_header
+    assert "refresh_token" in set_cookie_header
 
 
 # --- Alerts (protected) ---

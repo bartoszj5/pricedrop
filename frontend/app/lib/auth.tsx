@@ -32,6 +32,20 @@ const API_BASE =
     ? process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8000"
     : "";
 
+let refreshPromise: Promise<boolean> | null = null;
+
+async function tryRefresh(): Promise<boolean> {
+  try {
+    const res = await fetch(`${API_BASE}/auth/refresh`, {
+      method: "POST",
+      credentials: "include",
+    });
+    return res.ok;
+  } catch {
+    return false;
+  }
+}
+
 async function apiFetch<T>(
   path: string,
   options: RequestInit = {},
@@ -40,6 +54,19 @@ async function apiFetch<T>(
     credentials: "include",
     ...options,
   });
+  if (res.status === 401 && path !== "/auth/refresh" && path !== "/auth/login") {
+    if (!refreshPromise) {
+      refreshPromise = tryRefresh().finally(() => { refreshPromise = null; });
+    }
+    const refreshed = await refreshPromise;
+    if (refreshed) {
+      const retry = await fetch(`${API_BASE}${path}`, {
+        credentials: "include",
+        ...options,
+      });
+      if (retry.ok) return retry.json();
+    }
+  }
   if (!res.ok) {
     const body = await res.json().catch(() => null);
     throw new Error(body?.detail ?? `Request failed (${res.status})`);

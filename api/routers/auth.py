@@ -1,7 +1,7 @@
 from datetime import timedelta
 from typing import Annotated
 
-from fastapi import APIRouter, Depends, HTTPException, Response, status
+from fastapi import APIRouter, Depends, HTTPException, Request, Response, status
 from fastapi.security import OAuth2PasswordRequestForm
 import re
 
@@ -11,8 +11,12 @@ from sqlmodel import Session, select
 from dependencies.auth import (
     ACCESS_TOKEN_EXPIRE_MINUTES,
     AUTH_COOKIE_NAME,
+    REFRESH_COOKIE_NAME,
+    REFRESH_TOKEN_EXPIRE_DAYS,
     authenticate_user,
     create_access_token,
+    create_refresh_token,
+    decode_refresh_token,
     get_current_active_user,
     get_password_hash,
 )
@@ -82,6 +86,33 @@ def register(data: UserRegister, session: SessionDep):
     return user
 
 
+def _set_auth_cookies(response: Response, username: str) -> str:
+    access_token = create_access_token(
+        data={"sub": username},
+        expires_delta=timedelta(minutes=ACCESS_TOKEN_EXPIRE_MINUTES),
+    )
+    refresh_token = create_refresh_token(data={"sub": username})
+    response.set_cookie(
+        key=AUTH_COOKIE_NAME,
+        value=access_token,
+        httponly=True,
+        secure=True,
+        samesite="lax",
+        max_age=ACCESS_TOKEN_EXPIRE_MINUTES * 60,
+        path="/",
+    )
+    response.set_cookie(
+        key=REFRESH_COOKIE_NAME,
+        value=refresh_token,
+        httponly=True,
+        secure=True,
+        samesite="lax",
+        max_age=REFRESH_TOKEN_EXPIRE_DAYS * 24 * 60 * 60,
+        path="/",
+    )
+    return access_token
+
+
 @router.post("/login", response_model=Token)
 def login(
     form_data: Annotated[OAuth2PasswordRequestForm, Depends()],
@@ -95,25 +126,38 @@ def login(
             detail="Incorrect username or password",
             headers={"WWW-Authenticate": "Bearer"},
         )
-    access_token = create_access_token(
-        data={"sub": user.username},
-        expires_delta=timedelta(minutes=ACCESS_TOKEN_EXPIRE_MINUTES),
-    )
-    response.set_cookie(
-        key=AUTH_COOKIE_NAME,
-        value=access_token,
-        httponly=True,
-        secure=True,
-        samesite="lax",
-        max_age=ACCESS_TOKEN_EXPIRE_MINUTES * 60,
-        path="/",
-    )
+    access_token = _set_auth_cookies(response, user.username)
+    return Token(access_token=access_token, token_type="bearer")
+
+
+@router.post("/refresh", response_model=Token)
+def refresh(request: Request, session: SessionDep, response: Response):
+    token = request.cookies.get(REFRESH_COOKIE_NAME)
+    if not token:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="No refresh token",
+        )
+    username = decode_refresh_token(token)
+    if not username:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Invalid refresh token",
+        )
+    user = session.exec(select(User).where(User.username == username)).first()
+    if not user or not user.is_active:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="User not found or inactive",
+        )
+    access_token = _set_auth_cookies(response, user.username)
     return Token(access_token=access_token, token_type="bearer")
 
 
 @router.post("/logout")
 def logout(response: Response):
     response.delete_cookie(key=AUTH_COOKIE_NAME, path="/")
+    response.delete_cookie(key=REFRESH_COOKIE_NAME, path="/")
     return {"detail": "Logged out"}
 
 
