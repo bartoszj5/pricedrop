@@ -57,6 +57,10 @@ services:
       ITAD_API_KEY: ${ITAD_API_KEY:-}
       ITAD_BASE_URL: ${ITAD_BASE_URL:-https://api.isthereanydeal.com}
       ITAD_TIMEOUT_SECONDS: ${ITAD_TIMEOUT_SECONDS:-20}
+      # Production: set SECRET_KEY, ENVIRONMENT=production, and CORS_ORIGINS to real frontend origin(s)
+      SECRET_KEY: ${SECRET_KEY:-}
+      ENVIRONMENT: ${ENVIRONMENT:-development}
+      CORS_ORIGINS: ${CORS_ORIGINS:-http://localhost:3000}
       PYTHONPATH: /app
     depends_on:
       postgres:
