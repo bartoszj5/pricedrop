@@ -103,6 +103,21 @@ def test_login_success(client: TestClient):
     assert body["token_type"] == "bearer"
 
 
+def test_login_sets_httponly_cookie(client: TestClient):
+    _register(client)
+    resp = _login(client)
+    assert "access_token" in resp.cookies
+
+
+def test_me_via_cookie(client: TestClient):
+    _register(client)
+    resp = _login(client)
+    cookie_token = resp.cookies["access_token"]
+    resp = client.get("/auth/me", cookies={"access_token": cookie_token})
+    assert resp.status_code == 200
+    assert resp.json()["username"] == "testuser"
+
+
 def test_login_wrong_password(client: TestClient):
     _register(client)
     resp = _login(client, password="wrong")
@@ -127,6 +142,14 @@ def test_me_returns_current_user(client: TestClient):
 def test_me_requires_auth(client: TestClient):
     resp = client.get("/auth/me")
     assert resp.status_code == 401
+
+
+def test_logout_clears_cookie(client: TestClient):
+    _register(client)
+    _login(client)
+    resp = client.post("/auth/logout")
+    assert resp.status_code == 200
+    assert resp.cookies.get("access_token") == '""' or "access_token" in resp.headers.get("set-cookie", "")
 
 
 # --- Alerts (protected) ---

@@ -4,7 +4,7 @@ from typing import Annotated
 
 import bcrypt
 import jwt
-from fastapi import Depends, HTTPException, status
+from fastapi import Depends, HTTPException, Request, status
 from fastapi.security import OAuth2PasswordBearer
 from sqlmodel import Session, select
 
@@ -14,8 +14,9 @@ from shared.models import User
 SECRET_KEY = os.getenv("SECRET_KEY", "dev-secret-change-in-production")
 ALGORITHM = "HS256"
 ACCESS_TOKEN_EXPIRE_MINUTES = int(os.getenv("ACCESS_TOKEN_EXPIRE_MINUTES", "30"))
+AUTH_COOKIE_NAME = "access_token"
 
-oauth2_scheme = OAuth2PasswordBearer(tokenUrl="/auth/login")
+oauth2_scheme = OAuth2PasswordBearer(tokenUrl="/auth/login", auto_error=False)
 
 
 def verify_password(plain_password: str, hashed_password: str) -> bool:
@@ -44,9 +45,18 @@ def authenticate_user(session: Session, username: str, password: str) -> User | 
 
 
 async def get_current_user(
-    token: Annotated[str, Depends(oauth2_scheme)],
+    request: Request,
+    token: Annotated[str | None, Depends(oauth2_scheme)],
     session: Annotated[Session, Depends(get_session)],
 ) -> User:
+    if not token:
+        token = request.cookies.get(AUTH_COOKIE_NAME)
+    if not token:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Not authenticated",
+            headers={"WWW-Authenticate": "Bearer"},
+        )
     credentials_exception = HTTPException(
         status_code=status.HTTP_401_UNAUTHORIZED,
         detail="Could not validate credentials",

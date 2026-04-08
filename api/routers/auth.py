@@ -1,7 +1,7 @@
 from datetime import timedelta
 from typing import Annotated
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, Response, status
 from fastapi.security import OAuth2PasswordRequestForm
 import re
 
@@ -10,6 +10,7 @@ from sqlmodel import Session, select
 
 from dependencies.auth import (
     ACCESS_TOKEN_EXPIRE_MINUTES,
+    AUTH_COOKIE_NAME,
     authenticate_user,
     create_access_token,
     get_current_active_user,
@@ -82,7 +83,11 @@ def register(data: UserRegister, session: SessionDep):
 
 
 @router.post("/login", response_model=Token)
-def login(form_data: Annotated[OAuth2PasswordRequestForm, Depends()], session: SessionDep):
+def login(
+    form_data: Annotated[OAuth2PasswordRequestForm, Depends()],
+    session: SessionDep,
+    response: Response,
+):
     user = authenticate_user(session, form_data.username, form_data.password)
     if not user:
         raise HTTPException(
@@ -94,7 +99,22 @@ def login(form_data: Annotated[OAuth2PasswordRequestForm, Depends()], session: S
         data={"sub": user.username},
         expires_delta=timedelta(minutes=ACCESS_TOKEN_EXPIRE_MINUTES),
     )
+    response.set_cookie(
+        key=AUTH_COOKIE_NAME,
+        value=access_token,
+        httponly=True,
+        secure=True,
+        samesite="lax",
+        max_age=ACCESS_TOKEN_EXPIRE_MINUTES * 60,
+        path="/",
+    )
     return Token(access_token=access_token, token_type="bearer")
+
+
+@router.post("/logout")
+def logout(response: Response):
+    response.delete_cookie(key=AUTH_COOKIE_NAME, path="/")
+    return {"detail": "Logged out"}
 
 
 @router.get("/me", response_model=UserResponse)

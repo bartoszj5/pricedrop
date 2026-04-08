@@ -36,7 +36,10 @@ async function apiFetch<T>(
   path: string,
   options: RequestInit = {},
 ): Promise<T> {
-  const res = await fetch(`${API_BASE}${path}`, options);
+  const res = await fetch(`${API_BASE}${path}`, {
+    credentials: "include",
+    ...options,
+  });
   if (!res.ok) {
     const body = await res.json().catch(() => null);
     throw new Error(body?.detail ?? `Request failed (${res.status})`);
@@ -44,13 +47,10 @@ async function apiFetch<T>(
   return res.json();
 }
 
-async function loadUser(token: string): Promise<AuthUser | null> {
+async function loadUser(): Promise<AuthUser | null> {
   try {
-    return await apiFetch<AuthUser>("/auth/me", {
-      headers: { Authorization: `Bearer ${token}` },
-    });
+    return await apiFetch<AuthUser>("/auth/me");
   } catch {
-    localStorage.removeItem("token");
     return null;
   }
 }
@@ -61,12 +61,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
   useEffect(() => {
     let cancelled = false;
-    const token = localStorage.getItem("token");
-    if (!token) {
-      setLoading(false);
-      return;
-    }
-    loadUser(token).then((result) => {
+    loadUser().then((result) => {
       if (cancelled) return;
       setUser(result);
       setLoading(false);
@@ -78,13 +73,12 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
   const login = useCallback(async (username: string, password: string) => {
     const body = new URLSearchParams({ username, password });
-    const data = await apiFetch<{ access_token: string }>("/auth/login", {
+    await apiFetch<{ access_token: string }>("/auth/login", {
       method: "POST",
       body,
       headers: { "Content-Type": "application/x-www-form-urlencoded" },
     });
-    localStorage.setItem("token", data.access_token);
-    const me = await loadUser(data.access_token);
+    const me = await loadUser();
     setUser(me);
   }, []);
 
@@ -97,8 +91,8 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     await login(username, password);
   }, [login]);
 
-  const logout = useCallback(() => {
-    localStorage.removeItem("token");
+  const logout = useCallback(async () => {
+    await apiFetch("/auth/logout", { method: "POST" }).catch(() => {});
     setUser(null);
   }, []);
 
