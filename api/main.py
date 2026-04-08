@@ -1,22 +1,29 @@
+import os
+
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
-from routers import dedup, itad, prices, products, stores
+from routers import alerts, auth, dedup, itad, prices, products, stores
 
 app = FastAPI(title="PriceDrop API")
 
+CORS_ORIGINS = os.getenv("CORS_ORIGINS", "http://localhost:3000").split(",")
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origins=CORS_ORIGINS,
+    allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
 
+app.include_router(auth.router)
 app.include_router(dedup.router)
 app.include_router(products.router)
 app.include_router(stores.router)
 app.include_router(prices.router)
 app.include_router(itad.router)
+app.include_router(alerts.router)
 
 
 @app.get("/health")
