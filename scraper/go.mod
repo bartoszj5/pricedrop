@@ -5,6 +5,7 @@ go 1.26.1
 require (
 	github.com/gocolly/colly/v2 v2.3.0
 	github.com/lib/pq v1.12.2
+	github.com/rabbitmq/amqp091-go v1.10.0
 )
 
 require (

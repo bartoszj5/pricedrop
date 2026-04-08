@@ -13,6 +13,7 @@ import (
 type App struct {
 	config          Config
 	db              *DB
+	publisher       *Publisher
 	registry        *ScraperRegistry
 	crawlerRegistry *CrawlerRegistry
 	scrapeGuard     jobGuard
@@ -98,9 +99,17 @@ func main() {
 	crawlerRegistry.Register("morele", NewMoreleCrawler(cfg.UserAgent, cfg.RequestDelay))
 	crawlerRegistry.Register("mediaexpert", NewMediaExpertCrawler(meScraper))
 
+	pub, err := NewPublisher(cfg.RabbitMQURL)
+	if err != nil {
+		log.Printf("WARNING: RabbitMQ not available, price events will not be published: %v", err)
+	} else {
+		defer pub.Close()
+	}
+
 	app := &App{
 		config:          cfg,
 		db:              db,
+		publisher:       pub,
 		registry:        registry,
 		crawlerRegistry: crawlerRegistry,
 	}
@@ -309,6 +318,17 @@ func (app *App) scrapeStore(storeSlug string) ScrapeStoreResult {
 		if changed {
 			log.Printf("[%s] Price changed for %s: %.2f -> %.2f", storeSlug, p.ProductTitle, oldPrice, newPrice)
 			result.Updated++
+
+			if newPrice < oldPrice && app.publisher != nil {
+				app.publisher.PublishPriceDropped(PriceDroppedEvent{
+					ProductID:    p.ProductID,
+					ProductTitle: p.ProductTitle,
+					Store:        storeSlug,
+					OldPrice:     oldPrice,
+					NewPrice:     newPrice,
+					URL:          p.URL,
+				})
+			}
 		} else {
 			result.Unchanged++
 		}
