@@ -120,7 +120,47 @@ func main() {
 	log.Printf("Scraper listening on :%s", cfg.Port)
 	log.Printf("Registered scrapers: %v", registry.RegisteredSlugs())
 	log.Printf("Registered crawlers: %v", crawlerRegistry.RegisteredSlugs())
+	log.Printf("Scheduler intervals: scrape=%s crawl=%s", cfg.ScrapeInterval, cfg.CrawlInterval)
+	app.startSchedulers()
 	log.Fatal(http.ListenAndServe(":"+cfg.Port, mux))
+}
+
+func (app *App) startSchedulers() {
+	app.startScheduledJob("scrape", app.config.ScrapeInterval, &app.scrapeGuard, app.runScrapeAllStoresJob)
+	app.startScheduledJob("crawl", app.config.CrawlInterval, &app.crawlGuard, func() {
+		app.runCrawlAllStoresJob(defaultCrawlMaxPages)
+	})
+}
+
+func (app *App) startScheduledJob(name string, interval time.Duration, guard *jobGuard, job func()) {
+	if interval <= 0 {
+		log.Printf("[%s/scheduler] disabled (interval=%s)", name, interval)
+		return
+	}
+
+	go func() {
+		ticker := time.NewTicker(interval)
+		defer ticker.Stop()
+
+		log.Printf("[%s/scheduler] started (interval=%s)", name, interval)
+		for range ticker.C {
+			if !guard.tryStart() {
+				log.Printf("[%s/scheduler] skip tick: job already in progress", name)
+				continue
+			}
+
+			go func() {
+				started := time.Now()
+				log.Printf("[%s/scheduler] run started", name)
+				defer func() {
+					guard.finish()
+					log.Printf("[%s/scheduler] run finished in %s", name, time.Since(started).Round(time.Second))
+				}()
+
+				job()
+			}()
+		}
+	}()
 }
 
 func (app *App) handleHealth(w http.ResponseWriter, r *http.Request) {
@@ -146,8 +186,7 @@ func (app *App) handleScrape(w http.ResponseWriter, r *http.Request) {
 
 	go func() {
 		defer app.scrapeGuard.finish()
-		results := app.scrapeAllStores()
-		log.Printf("Scrape all completed: %+v", results)
+		app.runScrapeAllStoresJob()
 	}()
 
 	writeJSON(w, http.StatusAccepted, map[string]string{"status": "scrape started for all stores"})
@@ -205,6 +244,11 @@ func (app *App) scrapeAllStores() []ScrapeStoreResult {
 		results = append(results, result)
 	}
 	return results
+}
+
+func (app *App) runScrapeAllStoresJob() {
+	results := app.scrapeAllStores()
+	log.Printf("Scrape all completed: %+v", results)
 }
 
 func (app *App) scrapeStore(storeSlug string) ScrapeStoreResult {
@@ -331,6 +375,15 @@ func (app *App) handleScrapeTest(w http.ResponseWriter, r *http.Request) {
 
 const defaultCrawlMaxPages = 5
 
+func (app *App) runCrawlAllStoresJob(maxPages int) {
+	var allResults []CrawlCategoryResult
+	for _, slug := range app.crawlerRegistry.RegisteredSlugs() {
+		results := app.crawlStoreAllCategories(slug, maxPages)
+		allResults = append(allResults, results...)
+	}
+	log.Printf("Crawl all completed: %d category results", len(allResults))
+}
+
 // handleCrawl triggers crawling for all registered stores.
 // POST /crawl
 func (app *App) handleCrawl(w http.ResponseWriter, r *http.Request) {
@@ -346,12 +399,7 @@ func (app *App) handleCrawl(w http.ResponseWriter, r *http.Request) {
 
 	go func() {
 		defer app.crawlGuard.finish()
-		var allResults []CrawlCategoryResult
-		for _, slug := range app.crawlerRegistry.RegisteredSlugs() {
-			results := app.crawlStoreAllCategories(slug, defaultCrawlMaxPages)
-			allResults = append(allResults, results...)
-		}
-		log.Printf("Crawl all completed: %d category results", len(allResults))
+		app.runCrawlAllStoresJob(defaultCrawlMaxPages)
 	}()
 
 	writeJSON(w, http.StatusAccepted, map[string]string{"status": "crawl started for all stores"})
