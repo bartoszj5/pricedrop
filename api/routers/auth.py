@@ -1,0 +1,84 @@
+from datetime import timedelta
+from typing import Annotated
+
+from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi.security import OAuth2PasswordRequestForm
+from pydantic import BaseModel, EmailStr
+from sqlmodel import Session, select
+
+from dependencies.auth import (
+    ACCESS_TOKEN_EXPIRE_MINUTES,
+    authenticate_user,
+    create_access_token,
+    get_current_active_user,
+    get_password_hash,
+)
+from shared.database import get_session
+from shared.models import User
+
+router = APIRouter(prefix="/auth", tags=["auth"])
+
+SessionDep = Annotated[Session, Depends(get_session)]
+CurrentUser = Annotated[User, Depends(get_current_active_user)]
+
+
+class Token(BaseModel):
+    access_token: str
+    token_type: str
+
+
+class UserRegister(BaseModel):
+    username: str
+    email: EmailStr
+    password: str
+
+
+class UserResponse(BaseModel):
+    id: int
+    username: str
+    email: str
+    is_active: bool
+
+
+@router.post("/register", response_model=UserResponse, status_code=status.HTTP_201_CREATED)
+def register(data: UserRegister, session: SessionDep):
+    existing = session.exec(
+        select(User).where((User.username == data.username) | (User.email == data.email))
+    ).first()
+    if existing:
+        field = "username" if existing.username == data.username else "email"
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=f"User with this {field} already exists",
+        )
+
+    user = User(
+        username=data.username,
+        email=data.email,
+        hashed_password=get_password_hash(data.password),
+    )
+    session.add(user)
+    session.commit()
+    session.refresh(user)
+    return user
+
+
+@router.post("/login", response_model=Token)
+def login(form_data: Annotated[OAuth2PasswordRequestForm, Depends()], session: SessionDep):
+    user = authenticate_user(session, form_data.username, form_data.password)
+    if not user:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Incorrect username or password",
+            headers={"WWW-Authenticate": "Bearer"},
+        )
+    access_token = create_access_token(
+        data={"sub": user.username},
+        expires_delta=timedelta(minutes=ACCESS_TOKEN_EXPIRE_MINUTES),
+    )
+    return Token(access_token=access_token, token_type="bearer")
+
+
+@router.get("/me", response_model=UserResponse)
+def get_me(current_user: CurrentUser):
+    return current_user

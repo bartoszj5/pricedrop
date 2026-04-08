@@ -1,0 +1,182 @@
+from decimal import Decimal
+from pathlib import Path
+import sys
+
+from fastapi.testclient import TestClient
+from sqlalchemy.pool import StaticPool
+from sqlmodel import SQLModel, Session, create_engine
+
+ROOT = Path(__file__).resolve().parents[2]
+sys.path.insert(0, str(ROOT))
+sys.path.insert(0, str(ROOT / "api"))
+
+import pytest  # noqa: E402
+
+from main import app  # noqa: E402
+from shared.database import get_session  # noqa: E402
+from shared.models import Product  # noqa: E402
+
+
+@pytest.fixture()
+def client():
+    engine = create_engine(
+        "sqlite://",
+        connect_args={"check_same_thread": False},
+        poolclass=StaticPool,
+    )
+    SQLModel.metadata.create_all(engine)
+
+    def override_get_session():
+        with Session(engine) as session:
+            yield session
+
+    app.dependency_overrides[get_session] = override_get_session
+
+    with Session(engine) as session:
+        product = Product(title="Test Product", slug="test-product", category="game")
+        session.add(product)
+        session.commit()
+
+    with TestClient(app) as test_client:
+        yield test_client
+
+    app.dependency_overrides.clear()
+
+
+def _register(client: TestClient, username="testuser", email="test@example.com", password="Secret123!"):
+    return client.post("/auth/register", json={
+        "username": username,
+        "email": email,
+        "password": password,
+    })
+
+
+def _login(client: TestClient, username="testuser", password="Secret123!"):
+    return client.post("/auth/login", data={
+        "username": username,
+        "password": password,
+    })
+
+
+def _auth_header(client: TestClient) -> dict:
+    _register(client)
+    resp = _login(client)
+    token = resp.json()["access_token"]
+    return {"Authorization": f"Bearer {token}"}
+
+
+# --- Registration ---
+
+
+def test_register_success(client: TestClient):
+    resp = _register(client)
+    assert resp.status_code == 201
+    body = resp.json()
+    assert body["username"] == "testuser"
+    assert body["email"] == "test@example.com"
+    assert "hashed_password" not in body
+
+
+def test_register_duplicate_username(client: TestClient):
+    _register(client)
+    resp = _register(client, email="other@example.com")
+    assert resp.status_code == 409
+    assert "username" in resp.json()["detail"]
+
+
+def test_register_duplicate_email(client: TestClient):
+    _register(client)
+    resp = _register(client, username="other")
+    assert resp.status_code == 409
+    assert "email" in resp.json()["detail"]
+
+
+# --- Login ---
+
+
+def test_login_success(client: TestClient):
+    _register(client)
+    resp = _login(client)
+    assert resp.status_code == 200
+    body = resp.json()
+    assert "access_token" in body
+    assert body["token_type"] == "bearer"
+
+
+def test_login_wrong_password(client: TestClient):
+    _register(client)
+    resp = _login(client, password="wrong")
+    assert resp.status_code == 401
+
+
+def test_login_nonexistent_user(client: TestClient):
+    resp = _login(client, username="nobody")
+    assert resp.status_code == 401
+
+
+# --- /auth/me ---
+
+
+def test_me_returns_current_user(client: TestClient):
+    headers = _auth_header(client)
+    resp = client.get("/auth/me", headers=headers)
+    assert resp.status_code == 200
+    assert resp.json()["username"] == "testuser"
+
+
+def test_me_requires_auth(client: TestClient):
+    resp = client.get("/auth/me")
+    assert resp.status_code == 401
+
+
+# --- Alerts (protected) ---
+
+
+def test_create_and_list_alerts(client: TestClient):
+    headers = _auth_header(client)
+
+    resp = client.post("/alerts/", json={
+        "product_id": 1,
+        "target_price": "49.99",
+    }, headers=headers)
+    assert resp.status_code == 201
+    alert_id = resp.json()["id"]
+
+    resp = client.get("/alerts/", headers=headers)
+    assert resp.status_code == 200
+    assert len(resp.json()) == 1
+    assert resp.json()[0]["id"] == alert_id
+
+
+def test_create_alert_duplicate_rejected(client: TestClient):
+    headers = _auth_header(client)
+    client.post("/alerts/", json={"product_id": 1, "target_price": "49.99"}, headers=headers)
+    resp = client.post("/alerts/", json={"product_id": 1, "target_price": "39.99"}, headers=headers)
+    assert resp.status_code == 409
+
+
+def test_delete_alert(client: TestClient):
+    headers = _auth_header(client)
+    resp = client.post("/alerts/", json={"product_id": 1, "target_price": "49.99"}, headers=headers)
+    alert_id = resp.json()["id"]
+
+    resp = client.delete(f"/alerts/{alert_id}", headers=headers)
+    assert resp.status_code == 204
+
+    resp = client.get("/alerts/", headers=headers)
+    assert resp.json() == []
+
+
+def test_deactivate_alert(client: TestClient):
+    headers = _auth_header(client)
+    resp = client.post("/alerts/", json={"product_id": 1, "target_price": "49.99"}, headers=headers)
+    alert_id = resp.json()["id"]
+
+    resp = client.patch(f"/alerts/{alert_id}/deactivate", headers=headers)
+    assert resp.status_code == 200
+    assert resp.json()["is_active"] is False
+
+
+def test_alerts_require_auth(client: TestClient):
+    resp = client.get("/alerts/")
+    assert resp.status_code == 401
