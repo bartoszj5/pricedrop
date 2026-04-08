@@ -2,10 +2,10 @@ import os
 from datetime import datetime, timedelta, timezone
 from typing import Annotated
 
+import bcrypt
 import jwt
 from fastapi import Depends, HTTPException, status
 from fastapi.security import OAuth2PasswordBearer
-from passlib.context import CryptContext
 from sqlmodel import Session, select
 
 from shared.database import get_session
@@ -15,16 +15,15 @@ SECRET_KEY = os.getenv("SECRET_KEY", "dev-secret-change-in-production")
 ALGORITHM = "HS256"
 ACCESS_TOKEN_EXPIRE_MINUTES = int(os.getenv("ACCESS_TOKEN_EXPIRE_MINUTES", "30"))
 
-pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
 oauth2_scheme = OAuth2PasswordBearer(tokenUrl="/auth/login")
 
 
 def verify_password(plain_password: str, hashed_password: str) -> bool:
-    return pwd_context.verify(plain_password, hashed_password)
+    return bcrypt.checkpw(plain_password.encode(), hashed_password.encode())
 
 
 def get_password_hash(password: str) -> str:
-    return pwd_context.hash(password)
+    return bcrypt.hashpw(password.encode(), bcrypt.gensalt()).decode()
 
 
 def create_access_token(data: dict, expires_delta: timedelta | None = None) -> str:
@@ -37,7 +36,7 @@ def create_access_token(data: dict, expires_delta: timedelta | None = None) -> s
 def authenticate_user(session: Session, username: str, password: str) -> User | None:
     user = session.exec(select(User).where(User.username == username)).first()
     if not user:
-        pwd_context.hash("dummy")  # constant-time to prevent timing attacks
+        bcrypt.hashpw(b"dummy", bcrypt.gensalt())  # constant-time to prevent timing attacks
         return None
     if not verify_password(password, user.hashed_password):
         return None
