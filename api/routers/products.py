@@ -152,6 +152,9 @@ def _ensure_unique_product_slug(
         )
 
 
+FREE_GAME_CATEGORIES = ("game", "package", "dlc")
+
+
 def _apply_product_filters(
     statement,
     *,
@@ -188,6 +191,19 @@ def _apply_product_filters(
             )
             .exists()
         )
+
+    free_game_ids = (
+        select(Price.product_id)
+        .join(Product, Product.id == Price.product_id)
+        .where(
+            Product.category.in_(FREE_GAME_CATEGORIES),
+            Price.is_available.is_(True),
+            Price.current_price.is_not(None),
+        )
+        .group_by(Price.product_id)
+        .having(func.min(Price.current_price) <= 0)
+    )
+    statement = statement.where(Product.id.not_in(free_game_ids))
 
     return statement
 

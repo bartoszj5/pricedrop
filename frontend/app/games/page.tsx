@@ -9,7 +9,6 @@ import CatalogControls from "../components/CatalogControls";
 import ProductCard from "../components/ProductCard";
 import Pagination from "../components/Pagination";
 import EmptyState from "../components/EmptyState";
-import { isCatalogVisibleProduct } from "../lib/normalize";
 import type { ProductSort } from "../types";
 
 export const metadata: Metadata = {
@@ -49,7 +48,7 @@ export default async function GamesPage({ searchParams }: PageProps) {
     getStores({ page_size: 100 }, { fresh: true }),
   ]);
 
-  const items = productsData.items.filter(isCatalogVisibleProduct);
+  const items = productsData.items;
 
   return (
     <main className="page-shell flex flex-col gap-6">
