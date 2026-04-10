@@ -26,10 +26,39 @@ interface AuthContextValue {
 
 const AuthContext = createContext<AuthContextValue | null>(null);
 
-const API_BASE =
-  typeof window !== "undefined"
-    ? process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8000"
-    : "";
+function isLoopbackHost(hostname: string): boolean {
+  return hostname === "localhost" || hostname === "127.0.0.1" || hostname === "[::1]";
+}
+
+function normalizeApiBase(base: string): string {
+  return base.endsWith("/") ? base.slice(0, -1) : base;
+}
+
+function resolveApiBase(): string {
+  if (typeof window === "undefined") return "";
+
+  const configured = process.env.NEXT_PUBLIC_API_URL?.trim();
+  const currentHost = window.location.hostname;
+
+  if (configured) {
+    if (/^https?:\/\//i.test(configured)) {
+      try {
+        const configuredHost = new URL(configured).hostname;
+        // Public pages cannot call loopback addresses in modern browsers.
+        if (isLoopbackHost(configuredHost) && !isLoopbackHost(currentHost)) {
+          return `${window.location.protocol}//${currentHost}:8000`;
+        }
+      } catch {
+        // Ignore parse errors and use the configured value below.
+      }
+    }
+    return normalizeApiBase(configured);
+  }
+
+  return `${window.location.protocol}//${currentHost}:8000`;
+}
+
+const API_BASE = resolveApiBase();
 
 let refreshPromise: Promise<boolean> | null = null;
 

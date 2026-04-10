@@ -60,7 +60,8 @@ services:
       # Production: set SECRET_KEY, ENVIRONMENT=production, and CORS_ORIGINS to real frontend origin(s)
       SECRET_KEY: ${SECRET_KEY:-}
       ENVIRONMENT: ${ENVIRONMENT:-development}
-      CORS_ORIGINS: ${CORS_ORIGINS:-http://localhost:3000}
+      CORS_ORIGINS: ${CORS_ORIGINS:-http://localhost:3000,http://127.0.0.1:3000}
+      COOKIE_SECURE: ${COOKIE_SECURE:-}
       PYTHONPATH: /app
     depends_on:
       postgres:

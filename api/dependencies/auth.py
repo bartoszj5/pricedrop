@@ -18,11 +18,22 @@ if not _secret:
     _secret = "dev-secret-change-in-production"
 SECRET_KEY = _secret
 
+
+def _read_bool_env(name: str, default: bool) -> bool:
+    value = os.getenv(name)
+    if value is None:
+        return default
+    return value.strip().lower() in {"1", "true", "yes", "on"}
+
 ALGORITHM = "HS256"
 ACCESS_TOKEN_EXPIRE_MINUTES = int(os.getenv("ACCESS_TOKEN_EXPIRE_MINUTES", "30"))
 REFRESH_TOKEN_EXPIRE_DAYS = int(os.getenv("REFRESH_TOKEN_EXPIRE_DAYS", "7"))
 AUTH_COOKIE_NAME = "access_token"
 REFRESH_COOKIE_NAME = "refresh_token"
+COOKIE_SECURE = _read_bool_env(
+    "COOKIE_SECURE",
+    os.getenv("ENVIRONMENT") == "production",
+)
 
 oauth2_scheme = OAuth2PasswordBearer(tokenUrl="/auth/login", auto_error=False)
 
