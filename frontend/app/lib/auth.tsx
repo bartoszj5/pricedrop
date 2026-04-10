@@ -8,7 +8,6 @@ import {
   useMemo,
   useState,
 } from "react";
-/* eslint-disable react-hooks/set-state-in-effect -- Auth init on mount legitimately needs setState from async fetch */
 
 export interface AuthUser {
   id: number;
