@@ -4,8 +4,8 @@ import {
   AlertTriangle,
   Filter,
   Loader2,
-  Search,
   Settings2,
+  SlidersHorizontal,
   X,
 } from "lucide-react";
 import {
@@ -32,6 +32,16 @@ interface CatalogControlsProps {
   enableItadSearch?: boolean;
 }
 
+const SORT_LABELS: Record<ProductSort, string> = {
+  featured: "Polecane",
+  price_asc: "Cena rosnąco",
+  price_desc: "Cena malejąco",
+  newest: "Najnowsze",
+  title_asc: "Nazwa A-Z",
+  title_desc: "Nazwa Z-A",
+  category: "Kategorie",
+};
+
 export default function CatalogControls({
   stores = [],
   categories = [],
@@ -41,14 +51,11 @@ export default function CatalogControls({
   const router = useRouter();
   const pathname = usePathname();
   const searchParams = useSearchParams();
-  const [mobileOpen, setMobileOpen] = useState(false);
+  const [drawerOpen, setDrawerOpen] = useState(false);
   const [showAllCategories, setShowAllCategories] = useState(false);
-  const [searchValue, setSearchValue] = useState(searchParams.get("search") ?? "");
   const [isSearchNavPending, startNavTransition] = useTransition();
   const [isEnrichingCatalog, setIsEnrichingCatalog] = useState(false);
   const [lookupIssue, setLookupIssue] = useState<CatalogLookupIssue | null>(null);
-  const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  /** Zapobiega wielokrotnemu sync przy tym samym `?search=` (np. po `router.refresh()`). */
   const enrichCompletedForRef = useRef<string | null>(null);
 
   const urlSearchQuery = searchParams.get("search") ?? "";
@@ -64,10 +71,18 @@ export default function CatalogControls({
     searchParams.get("search"),
   ].filter(Boolean).length;
 
-  useEffect(() => {
-    // The controlled input mirrors the URL query so back/forward navigation stays in sync.
-    setSearchValue(searchParams.get("search") ?? "");
-  }, [searchParams]);
+  const searchParamsRef = useRef(searchParams);
+  const pathnameRef = useRef(pathname);
+  searchParamsRef.current = searchParams;
+  pathnameRef.current = pathname;
+
+  const buildRefreshUrl = useEffectEvent(() => {
+    const params = new URLSearchParams(searchParamsRef.current.toString());
+    params.delete("page");
+    const query = params.toString();
+    const path = pathnameRef.current;
+    return query ? `${path}?${query}` : path;
+  });
 
   useEffect(() => {
     if (!enableItadSearch) return;
@@ -101,7 +116,7 @@ export default function CatalogControls({
         }
         setLookupIssue(null);
         enrichCompletedForRef.current = trimmedUrlSearch;
-        const refreshUrl = buildUrl({});
+        const refreshUrl = buildRefreshUrl();
         startNavTransition(() => {
           router.replace(refreshUrl, { scroll: false });
         });
@@ -117,12 +132,7 @@ export default function CatalogControls({
     };
   }, [enableItadSearch, trimmedUrlSearch, router]);
 
-  const searchParamsRef = useRef(searchParams);
-  const pathnameRef = useRef(pathname);
-  searchParamsRef.current = searchParams;
-  pathnameRef.current = pathname;
-
-  function buildUrl(changes: Record<string, string | null>) {
+  function updateParams(changes: Record<string, string | null>) {
     const params = new URLSearchParams(searchParamsRef.current.toString());
     for (const [key, value] of Object.entries(changes)) {
       if (value && value.trim()) {
@@ -134,128 +144,98 @@ export default function CatalogControls({
     params.delete("page");
     const query = params.toString();
     const path = pathnameRef.current;
-    return query ? `${path}?${query}` : path;
-  }
-
-  const applySearchNavigation = useEffectEvent((value: string) => {
-    const nextUrl = buildUrl({ search: value.trim() || null });
-    startNavTransition(() => {
-      router.replace(nextUrl, { scroll: false });
-    });
-  });
-
-  const readSearchFromUrl = useEffectEvent(() => searchParams.get("search") ?? "");
-
-  useEffect(() => {
-    if (searchValue === readSearchFromUrl()) return;
-
-    if (debounceRef.current) {
-      clearTimeout(debounceRef.current);
-    }
-
-    debounceRef.current = setTimeout(() => {
-      applySearchNavigation(searchValue);
-    }, 400);
-
-    return () => {
-      if (debounceRef.current) {
-        clearTimeout(debounceRef.current);
-      }
-    };
-  }, [searchValue]);
-
-  function updateParams(changes: Record<string, string | null>) {
-    const nextUrl = buildUrl(changes);
+    const nextUrl = query ? `${path}?${query}` : path;
     startNavTransition(() => {
       router.replace(nextUrl, { scroll: false });
     });
   }
 
   function resetFilters() {
-    setSearchValue("");
     startNavTransition(() => {
       router.replace(pathname, { scroll: false });
     });
   }
 
-  const showGamesNavSpinner = enableItadSearch && isSearchNavPending;
+  const activeSortLabel = SORT_LABELS[activeSort] ?? SORT_LABELS.featured;
+  const activeStoreLabel =
+    stores.find((s) => s.slug === activeStore)?.name ?? null;
+  const showBackgroundSpinner =
+    enableItadSearch && (isEnrichingCatalog || isSearchNavPending);
 
   return (
     <>
-      <section className="section-card p-5 md:p-6">
-        <div className="flex flex-col gap-3">
-          <div className="flex flex-col gap-3 lg:flex-row">
-            <label className="flex min-h-14 flex-1 items-center gap-3 rounded-[24px] border border-border bg-bg-card px-5 shadow-[var(--shadow-card)]">
-              <span className="sr-only">
-                {enableItadSearch
-                  ? "Szukaj gier po tytule"
-                  : "Filtruj katalog po nazwie produktu"}
-              </span>
-              {showGamesNavSpinner ? (
-                <Loader2
-                  className="h-5 w-5 shrink-0 animate-spin text-text-muted"
-                  aria-hidden
-                />
-              ) : (
-                <Search className="h-5 w-5 shrink-0 text-text-muted" />
-              )}
-              <input
-                type="search"
-                aria-label={
-                  enableItadSearch
-                    ? "Szukaj gier po tytule"
-                    : "Filtruj katalog po nazwie produktu"
-                }
-                placeholder={
-                  enableItadSearch
-                    ? "Szukaj gry po tytule (np. Baldur, Cyberpunk, Witcher)"
-                    : "Szukaj sprzętu, gier, akcesoriów i konkretnych modeli"
-                }
-                value={searchValue}
-                onChange={(event) => setSearchValue(event.target.value)}
-                className="w-full bg-transparent py-4 text-base text-text-primary outline-none placeholder:text-text-muted"
-              />
-            </label>
-
-            <button
-              type="button"
-              aria-label="Otwórz panel filtrów"
-              onClick={() => setMobileOpen(true)}
-              className="inline-flex h-14 items-center justify-center gap-2 rounded-[24px] border border-border bg-bg-card px-5 text-sm font-semibold text-text-primary shadow-[var(--shadow-card)] lg:hidden"
-            >
-              <Filter className="h-4 w-4" />
-              Filtry
-              {activeFiltersCount > 0 && (
-                <span className="inline-flex h-6 min-w-6 items-center justify-center rounded-full bg-accent px-2 text-xs text-white">
-                  {activeFiltersCount}
-                </span>
-              )}
-            </button>
-          </div>
-
-          {enableItadSearch && isEnrichingCatalog && trimmedUrlSearch ? (
-            <p className="flex items-center gap-2 text-xs text-text-muted">
-              <Loader2
-                className="h-3.5 w-3.5 shrink-0 animate-spin"
-                aria-hidden
-              />
-              Uzupełniamy katalog w tle…
-            </p>
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <div className="flex items-center gap-2 text-sm text-text-secondary">
+          <span className="font-semibold text-text-primary">
+            {activeFiltersCount > 0
+              ? `Aktywne filtry: ${activeFiltersCount}`
+              : "Wszystkie produkty"}
+          </span>
+          {showBackgroundSpinner && trimmedUrlSearch ? (
+            <span className="flex items-center gap-1.5 text-xs text-text-muted">
+              <Loader2 className="h-3.5 w-3.5 animate-spin" aria-hidden />
+              Uzupełniamy katalog…
+            </span>
           ) : null}
         </div>
-      </section>
+
+        <div className="flex flex-wrap items-center gap-2">
+          <label className="relative flex items-center">
+            <span className="sr-only">Sortuj</span>
+            <SlidersHorizontal className="pointer-events-none absolute left-3 h-4 w-4 text-text-muted" />
+            <select
+              aria-label="Sortowanie"
+              value={activeSort}
+              onChange={(event) =>
+                updateParams({ sort: event.target.value || null })
+              }
+              className="h-10 appearance-none rounded-full border border-border bg-bg-card pl-9 pr-8 text-sm font-semibold text-text-primary outline-none hover:border-accent/40 focus:border-accent"
+            >
+              {(Object.keys(SORT_LABELS) as ProductSort[]).map((value) => (
+                <option key={value} value={value}>
+                  {SORT_LABELS[value]}
+                </option>
+              ))}
+            </select>
+          </label>
+
+          <button
+            type="button"
+            onClick={() => setDrawerOpen(true)}
+            className="flex h-10 items-center gap-2 rounded-full border border-border bg-bg-card px-4 text-sm font-semibold text-text-primary hover:border-accent/40"
+          >
+            <Filter className="h-4 w-4" />
+            Filtry
+            {activeFiltersCount > 0 && (
+              <span className="inline-flex h-5 min-w-5 items-center justify-center rounded-full bg-accent px-1.5 text-[0.7rem] text-white">
+                {activeFiltersCount}
+              </span>
+            )}
+          </button>
+
+          <span className="hidden items-center gap-1 text-xs text-text-muted md:inline-flex">
+            {activeStoreLabel && (
+              <span className="rounded-full bg-bg-tertiary px-2.5 py-1 font-semibold text-text-secondary">
+                {activeStoreLabel}
+              </span>
+            )}
+            <span>·</span>
+            <span>{activeSortLabel}</span>
+          </span>
+        </div>
+      </div>
 
       {enableItadSearch && lookupIssue && (
         <div
           className={`section-subtle flex items-start gap-4 p-5 ${
             lookupIssue.isConfig
-              ? "border-accent-amber/40 bg-[#fff4df]"
-              : "border-accent-red/30 bg-[#fff0eb]"
+              ? "border-accent-amber/40 bg-[#fff8e6]"
+              : "border-accent-red/30 bg-[#fef2f2]"
           }`}
         >
           <div
             className={`flex h-11 w-11 shrink-0 items-center justify-center rounded-full ${
-              lookupIssue.isConfig ? "bg-[#f5e1b5]" : "bg-[#f1d7cf]"
+              lookupIssue.isConfig ? "bg-[#fde68a]" : "bg-[#fecaca]"
             }`}
           >
             {lookupIssue.isConfig ? (
@@ -277,13 +257,13 @@ export default function CatalogControls({
         </div>
       )}
 
-      {mobileOpen && (
-        <div className="animate-fade-in fixed inset-0 z-50 bg-text-primary/20 backdrop-blur-sm lg:hidden">
+      {drawerOpen && (
+        <div className="animate-fade-in fixed inset-0 z-50 bg-text-primary/30 backdrop-blur-sm">
           <div
             role="dialog"
             aria-modal="true"
             aria-labelledby="catalog-filters-title"
-            className="animate-slide-up absolute inset-x-3 bottom-3 top-20 overflow-y-auto rounded-[30px] border border-border bg-bg-secondary p-5 shadow-[var(--shadow-float)]"
+            className="animate-slide-up absolute right-0 top-0 h-full w-[min(420px,calc(100vw-32px))] overflow-y-auto border-l border-border bg-bg-secondary p-6 shadow-[var(--shadow-float)]"
           >
             <div className="mb-5 flex items-center justify-between">
               <div>
@@ -298,7 +278,7 @@ export default function CatalogControls({
               <button
                 type="button"
                 aria-label="Zamknij panel filtrów"
-                onClick={() => setMobileOpen(false)}
+                onClick={() => setDrawerOpen(false)}
                 className="inline-flex h-10 w-10 items-center justify-center rounded-full border border-border bg-bg-card text-text-primary"
               >
                 <X className="h-4 w-4" />
@@ -319,7 +299,7 @@ export default function CatalogControls({
               }
               onUpdateParams={updateParams}
               onResetFilters={resetFilters}
-              onAfterChange={() => setMobileOpen(false)}
+              onAfterChange={() => setDrawerOpen(false)}
             />
           </div>
         </div>
