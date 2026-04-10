@@ -69,21 +69,21 @@ export default function PriceHistoryChart({ history }: PriceHistoryChartProps) {
   return (
     <ResponsiveContainer width="100%" height={320}>
       <LineChart data={chartData} margin={{ top: 5, right: 20, bottom: 5, left: 10 }}>
-        <CartesianGrid strokeDasharray="3 3" stroke="rgba(218,205,183,0.5)" />
+        <CartesianGrid strokeDasharray="3 3" stroke="var(--chart-grid)" />
         <XAxis
           dataKey="date"
-          stroke="#7a796f"
+          stroke="var(--chart-axis)"
           tick={{ fontSize: 12 }}
         />
         <YAxis
-          stroke="#7a796f"
+          stroke="var(--chart-axis)"
           tick={{ fontSize: 12 }}
           tickFormatter={(v: number) => `${v} zł`}
         />
         <Tooltip
           contentStyle={{
-            backgroundColor: "#fffaf2",
-            border: "1px solid #dacdb7",
+            backgroundColor: "var(--chart-tooltip-bg)",
+            border: "1px solid var(--chart-tooltip-border)",
             borderRadius: "16px",
             fontSize: "13px",
           }}
@@ -96,7 +96,7 @@ export default function PriceHistoryChart({ history }: PriceHistoryChartProps) {
               year: "numeric",
             });
           }}
-          labelStyle={{ color: "#556072" }}
+          labelStyle={{ color: "var(--chart-tooltip-label)" }}
           formatter={(value) => [`${Number(value).toFixed(2)} zł`]}
         />
         <Legend wrapperStyle={{ fontSize: "13px" }} />

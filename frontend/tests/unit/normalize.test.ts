@@ -1,8 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
-  isCatalogVisibleProduct,
   isGameLikeCategory,
-  isFreeGameProduct,
   isMainCatalogVisibleProduct,
   normalizePriceListResponse,
   normalizeProductDetailResponse,
@@ -43,35 +41,7 @@ describe("normalize transport responses", () => {
     expect(response.items[0]?.best_price).toBe(0);
   });
 
-  it("marks free game-like products as hidden in catalog", () => {
-    expect(
-      isFreeGameProduct({
-        category: "game",
-        best_price: 0,
-      }),
-    ).toBe(true);
-
-    expect(
-      isFreeGameProduct({
-        category: "package",
-        best_price: 0,
-      }),
-    ).toBe(true);
-
-    expect(
-      isCatalogVisibleProduct({
-        category: "game",
-        best_price: 0,
-      }),
-    ).toBe(false);
-
-    expect(
-      isCatalogVisibleProduct({
-        category: "game",
-        best_price: 19.99,
-      }),
-    ).toBe(true);
-
+  it("hides game-like categories from the main catalog", () => {
     expect(isGameLikeCategory(" package ")).toBe(true);
 
     expect(

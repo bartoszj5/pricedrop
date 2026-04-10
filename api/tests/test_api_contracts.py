@@ -156,9 +156,23 @@ def test_products_with_prices_store_filter_keeps_tracked_products_without_active
     payload = response.json()
 
     returned_slugs = {item["slug"] for item in payload["items"]}
-    assert {"free-dlc", "tracked-only"}.issubset(returned_slugs)
+    assert "tracked-only" in returned_slugs
+    assert "free-dlc" not in returned_slugs
 
     tracked_product = next(
         item for item in payload["items"] if item["slug"] == "tracked-only"
     )
     assert tracked_product["best_price"] is None
+
+
+def test_products_with_prices_excludes_free_game_like_products(
+    client: TestClient,
+):
+    response = client.get("/products/with-prices?category=game&page_size=100")
+
+    assert response.status_code == 200
+    payload = response.json()
+
+    returned_slugs = {item["slug"] for item in payload["items"]}
+    assert "free-dlc" not in returned_slugs
+    assert payload["total"] == len(payload["items"])
