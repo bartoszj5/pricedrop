@@ -68,7 +68,7 @@ export default function SearchBar() {
   return (
     <form
       onSubmit={submit}
-      className="flex h-11 w-full items-center gap-2 rounded-full border border-border bg-bg-tertiary px-5 focus-within:border-accent focus-within:bg-white focus-within:shadow-sm"
+      className="flex h-11 w-full items-center gap-2 rounded-full border border-border bg-bg-tertiary px-5 focus-within:border-accent focus-within:bg-bg-secondary focus-within:shadow-sm"
     >
       <Search className="h-4 w-4 shrink-0 text-text-muted" aria-hidden />
       <input

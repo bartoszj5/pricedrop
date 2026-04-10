@@ -229,13 +229,15 @@ export default function CatalogControls({
         <div
           className={`section-subtle flex items-start gap-4 p-5 ${
             lookupIssue.isConfig
-              ? "border-accent-amber/40 bg-[#fff8e6]"
-              : "border-accent-red/30 bg-[#fef2f2]"
+              ? "border-accent-amber/40 bg-[var(--warning-surface)]"
+              : "border-accent-red/30 bg-[var(--danger-surface)]"
           }`}
         >
           <div
             className={`flex h-11 w-11 shrink-0 items-center justify-center rounded-full ${
-              lookupIssue.isConfig ? "bg-[#fde68a]" : "bg-[#fecaca]"
+              lookupIssue.isConfig
+                ? "bg-[var(--warning-icon-bg)]"
+                : "bg-[var(--danger-icon-bg)]"
             }`}
           >
             {lookupIssue.isConfig ? (

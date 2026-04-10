@@ -136,7 +136,7 @@ export default async function StoreDetailPage({
               : `${getStoreSourceLabel(store.url)} jest jednym z kanałów widocznych w katalogu PriceDrop. Widok sklepu pokazuje komplet aktywnych i monitorowanych rekordów cenowych.`}
           </p>
           {genericStoreUrl ? (
-            <div className="section-subtle w-fit border-accent-blue/20 bg-[rgba(47,93,124,0.08)] px-4 py-3 text-sm leading-6 text-text-secondary">
+            <div className="section-subtle w-fit border-accent-blue/20 bg-[var(--info-surface)] px-4 py-3 text-sm leading-6 text-text-secondary">
               Adres sklepu nie został jeszcze zweryfikowany. Korzystaj z linków
               do konkretnych ofert przy produktach niżej.
             </div>

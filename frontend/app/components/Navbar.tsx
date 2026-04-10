@@ -15,6 +15,7 @@ import { useEffect, useRef, useState } from "react";
 import { useAuth } from "../lib/auth";
 import SearchBar from "./SearchBar";
 import CategoryNav from "./CategoryNav";
+import ThemeToggle from "./ThemeToggle";
 
 export default function Navbar() {
   const { user, loading, logout } = useAuth();
@@ -57,6 +58,7 @@ export default function Navbar() {
           </div>
 
           <div className="flex items-center gap-1.5">
+            <ThemeToggle />
             <div className="relative" ref={menuRef}>
               <button
                 type="button"

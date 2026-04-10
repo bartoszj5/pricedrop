@@ -3,6 +3,7 @@ import { TrendingDown } from "lucide-react";
 import { Fraunces, Manrope } from "next/font/google";
 import { Suspense } from "react";
 import { AuthProvider } from "./lib/auth";
+import { ThemeProvider, themeInitScript } from "./lib/theme";
 import Navbar from "./components/Navbar";
 import { SkeletonBox } from "./components/Skeleton";
 import "./globals.css";
@@ -33,8 +34,12 @@ export default function RootLayout({
   children: React.ReactNode;
 }) {
   return (
-      <html lang="pl" data-scroll-behavior="smooth">
+      <html lang="pl" data-scroll-behavior="smooth" data-theme="dark" suppressHydrationWarning>
+      <head>
+        <script dangerouslySetInnerHTML={{ __html: themeInitScript }} />
+      </head>
       <body className={`${displayFont.variable} ${bodyFont.variable} antialiased`}>
+        <ThemeProvider>
         <AuthProvider>
           <div className="flex min-h-screen flex-col">
             <Suspense
@@ -64,6 +69,7 @@ export default function RootLayout({
             </footer>
           </div>
         </AuthProvider>
+        </ThemeProvider>
       </body>
     </html>
   );
