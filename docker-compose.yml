@@ -57,6 +57,9 @@ services:
       ITAD_API_KEY: ${ITAD_API_KEY:-}
       ITAD_BASE_URL: ${ITAD_BASE_URL:-https://api.isthereanydeal.com}
       ITAD_TIMEOUT_SECONDS: ${ITAD_TIMEOUT_SECONDS:-20}
+      ITAD_SYNC_INTERVAL: ${ITAD_SYNC_INTERVAL:-6h}
+      ITAD_POPULAR_LIMIT: ${ITAD_POPULAR_LIMIT:-60}
+      ITAD_SYNC_COUNTRY: ${ITAD_SYNC_COUNTRY:-PL}
       # Production: set SECRET_KEY, ENVIRONMENT=production, and CORS_ORIGINS to real frontend origin(s)
       SECRET_KEY: ${SECRET_KEY:-}
       ENVIRONMENT: ${ENVIRONMENT:-development}

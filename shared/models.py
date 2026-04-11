@@ -18,6 +18,8 @@ class Product(SQLModel, table=True):
     description: str | None = Field(default=None)
     image_url: str | None = Field(default=None, max_length=512)
     release_date: datetime | None = Field(default=None)
+    popularity_rank: int | None = Field(default=None, index=True)
+    itad_game_id: str | None = Field(default=None, max_length=64, index=True)
     created_at: datetime = Field(
         default_factory=lambda: datetime.now(timezone.utc),
     )
