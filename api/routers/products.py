@@ -125,6 +125,7 @@ class ProductWithPricesListResponse(SQLModel):
 router = APIRouter(tags=["products"])
 ProductSort = Literal[
     "featured",
+    "popularity",
     "price_asc",
     "price_desc",
     "title_asc",
@@ -331,7 +332,16 @@ def list_products_with_prices(
         )
     )
 
-    if sort == "price_asc":
+    if sort == "popularity":
+        rank_missing = case((Product.popularity_rank.is_(None), 1), else_=0)
+        query = query.order_by(
+            rank_missing.asc(),
+            Product.popularity_rank.asc(),
+            best_price_missing.asc(),
+            best_price.asc(),
+            Product.title.asc(),
+        )
+    elif sort == "price_asc":
         query = query.order_by(best_price_missing.asc(), best_price.asc(), Product.title.asc())
     elif sort == "price_desc":
         query = query.order_by(

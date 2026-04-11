@@ -30,10 +30,12 @@ interface CatalogControlsProps {
   categories: string[];
   showCategories?: boolean;
   enableItadSearch?: boolean;
+  defaultSort?: ProductSort;
 }
 
 const SORT_LABELS: Record<ProductSort, string> = {
   featured: "Polecane",
+  popularity: "Najpopularniejsze",
   price_asc: "Cena rosnąco",
   price_desc: "Cena malejąco",
   newest: "Najnowsze",
@@ -47,6 +49,7 @@ export default function CatalogControls({
   categories = [],
   showCategories = true,
   enableItadSearch = false,
+  defaultSort = "featured",
 }: CatalogControlsProps) {
   const router = useRouter();
   const pathname = usePathname();
@@ -64,7 +67,7 @@ export default function CatalogControls({
   const activeCategory = searchParams.get("category") ?? "";
   const activeStore = searchParams.get("store") ?? "";
   const activeSort =
-    (searchParams.get("sort") as ProductSort | null) ?? "featured";
+    (searchParams.get("sort") as ProductSort | null) ?? defaultSort;
   const activeFiltersCount = [
     activeCategory,
     activeStore,
@@ -156,7 +159,8 @@ export default function CatalogControls({
     });
   }
 
-  const activeSortLabel = SORT_LABELS[activeSort] ?? SORT_LABELS.featured;
+  const activeSortLabel =
+    SORT_LABELS[activeSort] ?? SORT_LABELS[defaultSort] ?? SORT_LABELS.featured;
   const activeStoreLabel =
     stores.find((s) => s.slug === activeStore)?.name ?? null;
   const showBackgroundSpinner =

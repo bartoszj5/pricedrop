@@ -1,11 +1,35 @@
+import asyncio
+import logging
 import os
+from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
+from itad_scheduler import itad_sync_loop
 from routers import alerts, auth, dedup, itad, prices, products, stores
 
-app = FastAPI(title="PriceDrop API")
+logging.basicConfig(
+    level=os.getenv("LOG_LEVEL", "INFO").upper(),
+    format="%(asctime)s %(levelname)s %(name)s %(message)s",
+)
+
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    stop_event = asyncio.Event()
+    task = asyncio.create_task(itad_sync_loop(stop_event))
+    try:
+        yield
+    finally:
+        stop_event.set()
+        try:
+            await asyncio.wait_for(task, timeout=5)
+        except asyncio.TimeoutError:
+            task.cancel()
+
+
+app = FastAPI(title="PriceDrop API", lifespan=lifespan)
 
 CORS_ORIGINS = [
     origin.strip()

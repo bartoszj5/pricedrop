@@ -8,6 +8,7 @@ from typing import Annotated, Any
 
 import httpx
 from fastapi import APIRouter, Depends, HTTPException, Query, status
+from sqlalchemy import func, update as sql_update
 from sqlmodel import SQLModel, Session, select
 
 from shared.database import get_session
@@ -77,6 +78,16 @@ class ITADSearchSaveResponse(SQLModel):
     products_synced: int
     products_created: int
     products_updated: int
+    stores_created: int
+    prices_created: int
+    prices_updated: int
+    history_created: int
+
+
+class ITADPriceRefreshResponse(SQLModel):
+    source: str
+    country: str
+    products_refreshed: int
     stores_created: int
     prices_created: int
     prices_updated: int
@@ -247,18 +258,8 @@ def _hydrate_games_with_assets(
     return hydrated
 
 
-def _save_games_to_db(
-    session: Session,
-    games: list[dict[str, Any]],
-    prices_payload: list[Any],
-) -> tuple[dict[str, int], dict[str, "Product"]]:
-    """Save ITAD games with their deals to the database.
-
-    Returns (counts_dict, products_by_game_id).
-    """
-    now = datetime.now(timezone.utc)
-
-    counts = {
+def _empty_counts() -> dict[str, int]:
+    return {
         "products_created": 0,
         "products_updated": 0,
         "stores_created": 0,
@@ -267,48 +268,17 @@ def _save_games_to_db(
         "history_created": 0,
     }
 
-    all_stores = session.exec(select(Store)).all()
-    stores_by_name = {store.name.casefold(): store for store in all_stores}
-    used_slugs = {store.slug for store in all_stores}
 
-    products_by_game_id: dict[str, Product] = {}
-
-    for game in games:
-        game_id = str(game["id"])
-        slug = str(game["slug"])
-        title = str(game["title"])
-        category = _normalize_product_category(game.get("type"))
-        image_url = _image_from_assets(game)
-
-        product = session.exec(select(Product).where(Product.slug == slug)).first()
-        if product is None:
-            product = Product(
-                title=title,
-                slug=slug,
-                category=category,
-                image_url=image_url,
-            )
-            session.add(product)
-            session.flush()
-            counts["products_created"] += 1
-        else:
-            changed = False
-            if product.title != title:
-                product.title = title
-                changed = True
-            if product.category != category:
-                product.category = category
-                changed = True
-            if image_url and product.image_url != image_url:
-                product.image_url = image_url
-                changed = True
-            if changed:
-                product.updated_at = now
-                session.add(product)
-                counts["products_updated"] += 1
-
-        products_by_game_id[game_id] = product
-
+def _upsert_prices_from_payload(
+    session: Session,
+    products_by_game_id: dict[str, "Product"],
+    prices_payload: list[Any],
+    counts: dict[str, int],
+    *,
+    now: datetime,
+    stores_by_name: dict[str, "Store"],
+    used_slugs: set[str],
+) -> None:
     product_ids = [
         product.id
         for product in products_by_game_id.values()
@@ -451,6 +421,83 @@ def _save_games_to_db(
                 )
                 counts["history_created"] += 1
 
+
+def _save_games_to_db(
+    session: Session,
+    games: list[dict[str, Any]],
+    prices_payload: list[Any],
+    rank_by_game_id: dict[str, int] | None = None,
+) -> tuple[dict[str, int], dict[str, "Product"]]:
+    """Save ITAD games with their deals to the database.
+
+    Returns (counts_dict, products_by_game_id).
+    """
+    now = datetime.now(timezone.utc)
+    rank_by_game_id = rank_by_game_id or {}
+
+    counts = _empty_counts()
+
+    all_stores = session.exec(select(Store)).all()
+    stores_by_name = {store.name.casefold(): store for store in all_stores}
+    used_slugs = {store.slug for store in all_stores}
+
+    products_by_game_id: dict[str, Product] = {}
+
+    for game in games:
+        game_id = str(game["id"])
+        slug = str(game["slug"])
+        title = str(game["title"])
+        category = _normalize_product_category(game.get("type"))
+        image_url = _image_from_assets(game)
+        rank = rank_by_game_id.get(game_id)
+
+        product = session.exec(select(Product).where(Product.slug == slug)).first()
+        if product is None:
+            product = Product(
+                title=title,
+                slug=slug,
+                category=category,
+                image_url=image_url,
+                popularity_rank=rank,
+                itad_game_id=game_id,
+            )
+            session.add(product)
+            session.flush()
+            counts["products_created"] += 1
+        else:
+            changed = False
+            if product.title != title:
+                product.title = title
+                changed = True
+            if product.category != category:
+                product.category = category
+                changed = True
+            if image_url and product.image_url != image_url:
+                product.image_url = image_url
+                changed = True
+            if product.itad_game_id != game_id:
+                product.itad_game_id = game_id
+                changed = True
+            if rank is not None and product.popularity_rank != rank:
+                product.popularity_rank = rank
+                changed = True
+            if changed:
+                product.updated_at = now
+                session.add(product)
+                counts["products_updated"] += 1
+
+        products_by_game_id[game_id] = product
+
+    _upsert_prices_from_payload(
+        session,
+        products_by_game_id,
+        prices_payload,
+        counts,
+        now=now,
+        stores_by_name=stores_by_name,
+        used_slugs=used_slugs,
+    )
+
     return counts, products_by_game_id
 
 
@@ -477,6 +524,161 @@ def _select_deal_price(deal: dict[str, Any]) -> Decimal | None:
     if not isinstance(price_obj, dict):
         return None
     return _decimal_money(price_obj.get("amount"))
+
+
+def _fetch_popular_games(
+    client: httpx.Client,
+    limit: int,
+    offset: int,
+    only_games: bool,
+) -> list[dict[str, Any]]:
+    ranked_payload = _itad_request(
+        client,
+        "GET",
+        "/stats/most-popular/v1",
+        params={"limit": limit, "offset": offset},
+    )
+
+    if not isinstance(ranked_payload, list):
+        raise HTTPException(
+            status_code=status.HTTP_502_BAD_GATEWAY,
+            detail="Unexpected ITAD ranked games response format.",
+        )
+
+    return [
+        game
+        for game in ranked_payload
+        if isinstance(game, dict)
+        and isinstance(game.get("id"), str)
+        and isinstance(game.get("slug"), str)
+        and isinstance(game.get("title"), str)
+        and (not only_games or game.get("type") == "game")
+    ]
+
+
+def _fetch_prices_payload(
+    client: httpx.Client,
+    game_ids: list[str],
+    country_upper: str,
+) -> list[Any]:
+    prices_payload = _itad_request(
+        client,
+        "POST",
+        "/games/prices/v3",
+        params={"country": country_upper, "deals": False, "vouchers": True},
+        json_body=game_ids,
+    )
+
+    if not isinstance(prices_payload, list):
+        raise HTTPException(
+            status_code=status.HTTP_502_BAD_GATEWAY,
+            detail="Unexpected ITAD prices response format.",
+        )
+
+    return prices_payload
+
+
+def run_popular_games_sync(
+    session: Session,
+    *,
+    limit: int = 60,
+    offset: int = 0,
+    country: str = "PL",
+    only_games: bool = True,
+) -> tuple[dict[str, int], list[dict[str, Any]], int]:
+    """Fetch most-popular games from ITAD and upsert them into the DB.
+
+    Returns (counts, selected_games, ranked_games_fetched).
+    """
+    country_upper = country.upper()
+
+    with httpx.Client(
+        base_url=_get_base_url(),
+        timeout=_get_timeout_seconds(),
+        params={"key": _get_api_key()},
+    ) as client:
+        selected_games = _fetch_popular_games(client, limit, offset, only_games)
+        ranked_games_fetched = len(selected_games)
+
+        rank_by_game_id = {
+            str(game["id"]): offset + position
+            for position, game in enumerate(selected_games, start=1)
+        }
+
+        game_ids = [str(game["id"]) for game in selected_games]
+        if not game_ids:
+            return _empty_counts(), [], ranked_games_fetched
+
+        selected_games = _hydrate_games_with_assets(client, selected_games)
+        prices_payload = _fetch_prices_payload(client, game_ids, country_upper)
+
+    if offset == 0:
+        session.exec(
+            sql_update(Product)
+            .where(Product.popularity_rank.is_not(None))
+            .values(popularity_rank=None)
+        )
+
+    counts, _ = _save_games_to_db(
+        session, selected_games, prices_payload, rank_by_game_id=rank_by_game_id
+    )
+    session.commit()
+
+    return counts, selected_games, ranked_games_fetched
+
+
+def run_tracked_games_price_refresh(
+    session: Session,
+    *,
+    country: str = "PL",
+    batch_size: int = 100,
+) -> dict[str, int]:
+    """Refresh prices for all products in DB that have an itad_game_id."""
+    country_upper = country.upper()
+    now = datetime.now(timezone.utc)
+
+    tracked_products = session.exec(
+        select(Product).where(Product.itad_game_id.is_not(None))
+    ).all()
+
+    if not tracked_products:
+        return _empty_counts()
+
+    products_by_game_id: dict[str, Product] = {
+        p.itad_game_id: p for p in tracked_products if p.itad_game_id
+    }
+
+    counts = _empty_counts()
+
+    all_stores = session.exec(select(Store)).all()
+    stores_by_name = {store.name.casefold(): store for store in all_stores}
+    used_slugs = {store.slug for store in all_stores}
+
+    game_ids = list(products_by_game_id.keys())
+
+    with httpx.Client(
+        base_url=_get_base_url(),
+        timeout=_get_timeout_seconds(),
+        params={"key": _get_api_key()},
+    ) as client:
+        for start in range(0, len(game_ids), batch_size):
+            batch = game_ids[start : start + batch_size]
+            prices_payload = _fetch_prices_payload(client, batch, country_upper)
+            batch_map = {
+                gid: products_by_game_id[gid] for gid in batch if gid in products_by_game_id
+            }
+            _upsert_prices_from_payload(
+                session,
+                batch_map,
+                prices_payload,
+                counts,
+                now=now,
+                stores_by_name=stores_by_name,
+                used_slugs=used_slugs,
+            )
+
+    session.commit()
+    return counts
 
 
 @router.get("/itad/search-deals", response_model=list[ITADGameWithDeals])
@@ -675,79 +877,20 @@ def search_itad_games(
 @router.post("/itad/sync", response_model=ITADSyncResponse)
 def sync_itad_games(
     session: Annotated[Session, Depends(get_session)],
-    limit: Annotated[int, Query(ge=1, le=200)] = 50,
+    limit: Annotated[int, Query(ge=1, le=200)] = 60,
     offset: Annotated[int, Query(ge=0)] = 0,
     country: Annotated[str, Query(min_length=2, max_length=2)] = "PL",
     only_games: bool = True,
 ) -> ITADSyncResponse:
-    api_key = _get_api_key()
     country_upper = country.upper()
 
-    with httpx.Client(
-        base_url=_get_base_url(),
-        timeout=_get_timeout_seconds(),
-        params={"key": api_key},
-    ) as client:
-        ranked_payload = _itad_request(
-            client,
-            "GET",
-            "/stats/most-popular/v1",
-            params={"limit": limit, "offset": offset},
-        )
-
-        if not isinstance(ranked_payload, list):
-            raise HTTPException(
-                status_code=status.HTTP_502_BAD_GATEWAY,
-                detail="Unexpected ITAD ranked games response format.",
-            )
-
-        selected_games = [
-            game
-            for game in ranked_payload
-            if isinstance(game, dict)
-            and isinstance(game.get("id"), str)
-            and isinstance(game.get("slug"), str)
-            and isinstance(game.get("title"), str)
-            and (not only_games or game.get("type") == "game")
-        ]
-
-        game_ids = [str(game["id"]) for game in selected_games]
-        if not game_ids:
-            return ITADSyncResponse(
-                source="isthereanydeal",
-                country=country_upper,
-                ranked_games_fetched=len(ranked_payload),
-                games_selected=0,
-                products_synced=0,
-                products_created=0,
-                products_updated=0,
-                stores_created=0,
-                prices_created=0,
-                prices_updated=0,
-                history_created=0,
-                preview=[],
-            )
-
-        selected_games = _hydrate_games_with_assets(client, selected_games)
-
-        prices_payload = _itad_request(
-            client,
-            "POST",
-            "/games/prices/v3",
-            params={"country": country_upper, "deals": False, "vouchers": True},
-            json_body=game_ids,
-        )
-
-    if not isinstance(prices_payload, list):
-        raise HTTPException(
-            status_code=status.HTTP_502_BAD_GATEWAY,
-            detail="Unexpected ITAD prices response format.",
-        )
-
-    counts, products_by_game_id = _save_games_to_db(
-        session, selected_games, prices_payload
+    counts, selected_games, ranked_games_fetched = run_popular_games_sync(
+        session,
+        limit=limit,
+        offset=offset,
+        country=country_upper,
+        only_games=only_games,
     )
-    session.commit()
 
     preview = [
         ITADGameRead(
@@ -764,11 +907,36 @@ def sync_itad_games(
     return ITADSyncResponse(
         source="isthereanydeal",
         country=country_upper,
-        ranked_games_fetched=len(ranked_payload),
+        ranked_games_fetched=ranked_games_fetched,
         games_selected=len(selected_games),
-        products_synced=len(products_by_game_id),
+        products_synced=len(selected_games),
         preview=preview,
         **counts,
+    )
+
+
+@router.post("/itad/refresh-prices", response_model=ITADPriceRefreshResponse)
+def refresh_itad_prices(
+    session: Annotated[Session, Depends(get_session)],
+    country: Annotated[str, Query(min_length=2, max_length=2)] = "PL",
+) -> ITADPriceRefreshResponse:
+    """Refresh prices for every product in DB that has an itad_game_id."""
+    country_upper = country.upper()
+
+    tracked_count = session.exec(
+        select(func.count()).select_from(Product).where(Product.itad_game_id.is_not(None))
+    ).one()
+
+    counts = run_tracked_games_price_refresh(session, country=country_upper)
+
+    return ITADPriceRefreshResponse(
+        source="isthereanydeal",
+        country=country_upper,
+        products_refreshed=int(tracked_count or 0),
+        stores_created=counts["stores_created"],
+        prices_created=counts["prices_created"],
+        prices_updated=counts["prices_updated"],
+        history_created=counts["history_created"],
     )
 
 

@@ -29,7 +29,10 @@ export default async function GamesPage({ searchParams }: PageProps) {
     typeof params.page === "string" ? parseInt(params.page, 10) || 1 : 1;
   const store =
     typeof params.store === "string" ? params.store : undefined;
-  const sort = typeof params.sort === "string" ? params.sort : undefined;
+  const sort =
+    typeof params.sort === "string" && params.sort
+      ? (params.sort as ProductSort)
+      : ("popularity" as ProductSort);
 
   const trimmedSearch = search?.trim();
 
@@ -39,7 +42,7 @@ export default async function GamesPage({ searchParams }: PageProps) {
         search,
         category: "game",
         store,
-        sort: sort as ProductSort | undefined,
+        sort,
         page,
         page_size: 30,
       },
@@ -58,6 +61,7 @@ export default async function GamesPage({ searchParams }: PageProps) {
           categories={productsData.categories ?? []}
           showCategories={false}
           enableItadSearch
+          defaultSort="popularity"
         />
       </Suspense>
 

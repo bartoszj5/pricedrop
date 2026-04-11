@@ -254,6 +254,7 @@ export interface ITADSearchSaveResponse {
 
 export type ProductSort =
   | "featured"
+  | "popularity"
   | "price_asc"
   | "price_desc"
   | "title_asc"
