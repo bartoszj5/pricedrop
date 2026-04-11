@@ -155,6 +155,22 @@ def _ensure_unique_product_slug(
 
 FREE_GAME_CATEGORIES = ("game", "package", "dlc")
 
+NOISE_TITLE_TERMS = (
+    "soundtrack",
+    "ost",
+    "season pass",
+    "year pass",
+    "year 1 pass",
+    "year 2 pass",
+    "season 1",
+    "season 2",
+    "battle pass",
+    "upgrade pack",
+    "dlc",
+    "demo",
+    "companion",
+)
+
 
 def _apply_product_filters(
     statement,
@@ -334,13 +350,41 @@ def list_products_with_prices(
 
     if sort == "popularity":
         rank_missing = case((Product.popularity_rank.is_(None), 1), else_=0)
-        query = query.order_by(
-            rank_missing.asc(),
-            Product.popularity_rank.asc(),
-            best_price_missing.asc(),
-            best_price.asc(),
-            Product.title.asc(),
+        order_columns = []
+        trimmed_search = search.strip() if search else ""
+        if trimmed_search:
+            search_lower = trimmed_search.lower()
+            title_lower = func.lower(Product.title)
+            title_match_rank = case(
+                (title_lower == search_lower, 0),
+                (title_lower.like(f"{search_lower} %"), 1),
+                (title_lower.like(f"{search_lower}%"), 2),
+                (title_lower.like(f"% {search_lower} %"), 3),
+                (title_lower.like(f"%{search_lower}%"), 4),
+                else_=5,
+            )
+            noise_penalty = case(
+                (
+                    or_(
+                        *[title_lower.like(f"%{term}%") for term in NOISE_TITLE_TERMS]
+                    ),
+                    1,
+                ),
+                else_=0,
+            )
+            order_columns.extend(
+                [title_match_rank.asc(), noise_penalty.asc()]
+            )
+        order_columns.extend(
+            [
+                rank_missing.asc(),
+                Product.popularity_rank.asc(),
+                best_price_missing.asc(),
+                best_price.asc(),
+                Product.title.asc(),
+            ]
         )
+        query = query.order_by(*order_columns)
     elif sort == "price_asc":
         query = query.order_by(best_price_missing.asc(), best_price.asc(), Product.title.asc())
     elif sort == "price_desc":

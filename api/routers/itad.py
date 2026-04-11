@@ -8,7 +8,7 @@ from typing import Annotated, Any
 
 import httpx
 from fastapi import APIRouter, Depends, HTTPException, Query, status
-from sqlalchemy import func, update as sql_update
+from sqlalchemy import func
 from sqlmodel import SQLModel, Session, select
 
 from shared.database import get_session
@@ -222,7 +222,43 @@ def _merge_game_with_info(game: dict[str, Any], info: dict[str, Any]) -> dict[st
     if isinstance(assets, dict) and assets:
         merged["assets"] = assets
 
+    stats = info.get("stats")
+    if isinstance(stats, dict) and stats:
+        merged["stats"] = stats
+
+    release_date = info.get("releaseDate")
+    if isinstance(release_date, str) and release_date:
+        merged["releaseDate"] = release_date
+
     return merged
+
+
+def _parse_iso_date(value: Any) -> datetime | None:
+    if not isinstance(value, str) or not value:
+        return None
+    text = value.strip()
+    try:
+        if "T" in text:
+            parsed = datetime.fromisoformat(text.replace("Z", "+00:00"))
+        else:
+            parsed = datetime.fromisoformat(f"{text}T00:00:00+00:00")
+    except ValueError:
+        return None
+    if parsed.tzinfo is None:
+        parsed = parsed.replace(tzinfo=timezone.utc)
+    return parsed
+
+
+def _extract_itad_rank(game: dict[str, Any]) -> int | None:
+    stats = game.get("stats")
+    if not isinstance(stats, dict):
+        return None
+    rank = stats.get("rank")
+    if isinstance(rank, bool):
+        return None
+    if isinstance(rank, int) and rank > 0:
+        return rank
+    return None
 
 
 def _hydrate_games_with_assets(
@@ -449,7 +485,8 @@ def _save_games_to_db(
         title = str(game["title"])
         category = _normalize_product_category(game.get("type"))
         image_url = _image_from_assets(game)
-        rank = rank_by_game_id.get(game_id)
+        rank = _extract_itad_rank(game) or rank_by_game_id.get(game_id)
+        release_date = _parse_iso_date(game.get("releaseDate"))
 
         product = session.exec(select(Product).where(Product.slug == slug)).first()
         if product is None:
@@ -460,6 +497,7 @@ def _save_games_to_db(
                 image_url=image_url,
                 popularity_rank=rank,
                 itad_game_id=game_id,
+                release_date=release_date,
             )
             session.add(product)
             session.flush()
@@ -480,6 +518,9 @@ def _save_games_to_db(
                 changed = True
             if rank is not None and product.popularity_rank != rank:
                 product.popularity_rank = rank
+                changed = True
+            if release_date is not None and product.release_date != release_date:
+                product.release_date = release_date
                 changed = True
             if changed:
                 product.updated_at = now
@@ -611,13 +652,6 @@ def run_popular_games_sync(
 
         selected_games = _hydrate_games_with_assets(client, selected_games)
         prices_payload = _fetch_prices_payload(client, game_ids, country_upper)
-
-    if offset == 0:
-        session.exec(
-            sql_update(Product)
-            .where(Product.popularity_rank.is_not(None))
-            .values(popularity_rank=None)
-        )
 
     counts, _ = _save_games_to_db(
         session, selected_games, prices_payload, rank_by_game_id=rank_by_game_id
