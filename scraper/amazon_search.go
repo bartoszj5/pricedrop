@@ -168,7 +168,7 @@ func hitShowsManufacturerCodeAmazon(hit *AmazonSearchHit, code string) bool {
 
 // amazonMinScoreWhenMfrNotInHit: if our DB row has an MPN but the Amazon card title does not contain it,
 // require stronger title overlap — otherwise unrelated listings (e.g. accessories) score ~0.43 on shared tokens.
-const amazonMinScoreWhenMfrNotInHit = 0.52
+const amazonMinScoreWhenMfrNotInHit = 0.60
 
 // searchQueryIsManufacturerCode reports whether this search attempt was the MPN-style query (same normalized key).
 func searchQueryIsManufacturerCode(searchQuery, manufacturerCode string) bool {
@@ -212,8 +212,8 @@ func pickBestAmazonHit(productTitle, manufacturerCode string, hits []AmazonSearc
 		h := &pool[i]
 		candidate := strings.TrimSpace(h.Title)
 		s := titleTokenJaccard(productTitle, candidate)
-		if code != "" && hitShowsManufacturerCodeAmazon(h, code) && s < 0.42 {
-			s = 0.42
+		if code != "" && hitShowsManufacturerCodeAmazon(h, code) && s < 0.50 {
+			s = 0.50
 		}
 		if s > topScore {
 			topScore = s

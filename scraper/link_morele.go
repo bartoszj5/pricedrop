@@ -77,8 +77,8 @@ func pickBestMoreleHit(productTitle, manufacturerCode string, hits []MoreleSearc
 			candidate = moreleURLStem(h.URL)
 		}
 		s := titleTokenJaccard(productTitle, candidate)
-		if code != "" && hitShowsManufacturerCode(h, code) && s < 0.42 {
-			s = 0.42
+		if code != "" && hitShowsManufacturerCode(h, code) && s < 0.50 {
+			s = 0.50
 		}
 		if s > topScore {
 			topScore = s

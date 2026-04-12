@@ -134,8 +134,8 @@ func pickBestMediaExpertHit(productTitle, manufacturerCode string, hits []mediaE
 		h := &pool[i]
 		candidate := mediaExpertHitCandidateTitle(h)
 		s := titleTokenJaccard(productTitle, candidate)
-		if code != "" && hitShowsManufacturerCodeMediaExpert(h, code) && s < 0.42 {
-			s = 0.42
+		if code != "" && hitShowsManufacturerCodeMediaExpert(h, code) && s < 0.50 {
+			s = 0.50
 		}
 		if s > topScore {
 			topScore = s

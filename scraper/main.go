@@ -121,9 +121,9 @@ func main() {
 	mux.HandleFunc("/scrape/", app.handleScrapeStore)
 	mux.HandleFunc("/crawl", app.handleCrawl)
 	mux.HandleFunc("/crawl/", app.handleCrawlStore)
-	mux.HandleFunc("/link/morele", app.handleLink("morele", 0.32, &app.linkMoreleGuard, app.runLinkMorele))
-	mux.HandleFunc("/link/mediaexpert", app.handleLink("mediaexpert", 0.32, &app.linkMEGuard, app.runLinkMediaExpert))
-	mux.HandleFunc("/link/amazon", app.handleLink("amazon", 0.40, &app.linkAmazonGuard, app.runLinkAmazon))
+	mux.HandleFunc("/link/morele", app.handleLink("morele", 0.45, &app.linkMoreleGuard, app.runLinkMorele))
+	mux.HandleFunc("/link/mediaexpert", app.handleLink("mediaexpert", 0.45, &app.linkMEGuard, app.runLinkMediaExpert))
+	mux.HandleFunc("/link/amazon", app.handleLink("amazon", 0.50, &app.linkAmazonGuard, app.runLinkAmazon))
 	mux.HandleFunc("/enrich/x-kom-manufacturer-code", app.handleEnrichXKOMManufacturer)
 
 	log.Printf("Scraper listening on :%s", cfg.Port)

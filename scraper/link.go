@@ -14,6 +14,7 @@ type ProductToLink struct {
 	Title            string
 	ManufacturerCode string
 	SourceURL        string
+	SourcePrice      float64
 }
 
 // LinkSummary is the unified result type for all link jobs (morele, mediaexpert, amazon).
@@ -23,6 +24,7 @@ type LinkSummary struct {
 	SkippedLowScore    int   `json:"skipped_low_score"`
 	SkippedMfrMismatch int   `json:"skipped_mfr_mismatch"`
 	SkippedNoPrice     int   `json:"skipped_no_price,omitempty"`
+	SkippedPriceRatio  int   `json:"skipped_price_ratio,omitempty"`
 	NoSearchHits       int   `json:"no_search_hits"`
 	Errors             int   `json:"errors"`
 	DryRun             bool  `json:"dry_run"`
@@ -161,7 +163,11 @@ func titleTokenJaccard(a, b string) float64 {
 	return float64(inter) / float64(union)
 }
 
-// linkVerifyAndUpsert checks manufacturer code compatibility, rounds the price, and upserts.
+// maxLinkPriceRatio is the maximum allowed ratio between source and target price.
+// If the source price is 5x or more than the target price (or vice versa), the match is rejected.
+const maxLinkPriceRatio = 5.0
+
+// linkVerifyAndUpsert checks manufacturer code compatibility, price sanity, rounds the price, and upserts.
 // Returns true if the price was upserted, false if skipped or failed (sum is updated accordingly).
 func linkVerifyAndUpsert(app *App, sum *LinkSummary, storeName string, pr ProductToLink, storeID int, scraped *ScrapeResult, productURL string, score float64) bool {
 	if want := manufacturerCodeForLinking(pr.ManufacturerCode); want != "" {
@@ -174,6 +180,19 @@ func linkVerifyAndUpsert(app *App, sum *LinkSummary, storeName string, pr Produc
 	}
 
 	newPrice := math.Round(scraped.Price*100) / 100
+
+	// Price ratio sanity check: reject if source and target prices differ by more than 5x.
+	if pr.SourcePrice > 0 && newPrice > 0 {
+		ratio := pr.SourcePrice / newPrice
+		if ratio < 1 {
+			ratio = 1 / ratio
+		}
+		if ratio > maxLinkPriceRatio {
+			sum.SkippedPriceRatio++
+			log.Printf("[link/%s] product %d: price ratio %.1fx (source=%.2f target=%.2f) exceeds %.0fx — skip", storeName, pr.ID, ratio, pr.SourcePrice, newPrice, maxLinkPriceRatio)
+			return false
+		}
+	}
 	currency := scraped.Currency
 	if currency == "" {
 		currency = "PLN"
