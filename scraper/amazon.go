@@ -1,9 +1,13 @@
 package main
 
 import (
+	"crypto/tls"
 	"errors"
 	"fmt"
 	"log"
+	"net"
+	"net/http"
+	"net/http/cookiejar"
 	"strconv"
 	"strings"
 	"time"
@@ -17,12 +21,29 @@ var ErrAmazonNoBuyBoxPrice = errors.New("no buy box price")
 type AmazonScraper struct {
 	userAgent    string
 	requestDelay time.Duration
+	cookieJar    http.CookieJar
+	transport    *http.Transport
 }
 
 func NewAmazonScraper(userAgent string, requestDelay time.Duration) *AmazonScraper {
+	jar, _ := cookiejar.New(nil)
+	// Force HTTP/1.1 — Amazon's CDN (CloudFront) sometimes rejects Go's
+	// default HTTP/2 TLS fingerprint with a stream reset that surfaces as
+	// a "Bad Request" transport-level error.
+	tr := &http.Transport{
+		TLSClientConfig:   &tls.Config{MinVersion: tls.VersionTLS12},
+		ForceAttemptHTTP2:  false,
+		TLSNextProto:       make(map[string]func(string, *tls.Conn) http.RoundTripper),
+		DialContext: (&net.Dialer{
+			Timeout:   30 * time.Second,
+			KeepAlive: 30 * time.Second,
+		}).DialContext,
+	}
 	return &AmazonScraper{
 		userAgent:    userAgent,
 		requestDelay: requestDelay,
+		cookieJar:    jar,
+		transport:    tr,
 	}
 }
 
@@ -41,6 +62,8 @@ func (s *AmazonScraper) ScrapeProduct(url string) (*ScrapeResult, error) {
 		colly.UserAgent(s.userAgent),
 		colly.IgnoreRobotsTxt(),
 	)
+	c.WithTransport(s.transport)
+	c.SetCookieJar(s.cookieJar)
 
 	c.Limit(&colly.LimitRule{
 		DomainGlob:  "*amazon.pl*",
@@ -179,6 +202,11 @@ func (s *AmazonScraper) ScrapeProduct(url string) (*ScrapeResult, error) {
 	}
 
 	if result.ProductName == "" && result.Price == 0 {
+		snippet := pageBody
+		if len(snippet) > 500 {
+			snippet = snippet[:500]
+		}
+		log.Printf("[amazon] Empty result at %s, body preview: %s", url, snippet)
 		return nil, fmt.Errorf("no product data found at %s", url)
 	}
 
