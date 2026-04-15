@@ -29,6 +29,7 @@ class Product(SQLModel, table=True):
 
     prices: list["Price"] = Relationship(back_populates="product")
     alerts: list["Alert"] = Relationship(back_populates="product")
+    likes: list["ProductLike"] = Relationship(back_populates="product")
 
 
 # --- Store ---
@@ -107,12 +108,14 @@ class User(SQLModel, table=True):
     email: str = Field(max_length=255, unique=True, index=True)
     username: str = Field(max_length=100, unique=True, index=True)
     hashed_password: str = Field(max_length=255)
+    discord_webhook_url: str | None = Field(default=None, max_length=1024)
     is_active: bool = Field(default=True)
     created_at: datetime = Field(
         default_factory=lambda: datetime.now(timezone.utc),
     )
 
     alerts: list["Alert"] = Relationship(back_populates="user")
+    likes: list["ProductLike"] = Relationship(back_populates="user")
 
 
 # --- Alert ---
@@ -134,3 +137,23 @@ class Alert(SQLModel, table=True):
 
     user: User = Relationship(back_populates="alerts")
     product: Product = Relationship(back_populates="alerts")
+
+
+# --- ProductLike ---
+
+
+class ProductLike(SQLModel, table=True):
+    __tablename__ = "product_likes"
+    __table_args__ = (
+        UniqueConstraint("user_id", "product_id", name="uq_product_like_user_product"),
+    )
+
+    id: int | None = Field(default=None, primary_key=True)
+    user_id: int = Field(foreign_key="users.id", index=True)
+    product_id: int = Field(foreign_key="products.id", index=True)
+    created_at: datetime = Field(
+        default_factory=lambda: datetime.now(timezone.utc),
+    )
+
+    user: User = Relationship(back_populates="likes")
+    product: Product = Relationship(back_populates="likes")

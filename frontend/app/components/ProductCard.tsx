@@ -3,10 +3,12 @@
 import Image from "next/image";
 import Link from "next/link";
 import { Flame, Heart, ImageOff } from "lucide-react";
+import { useRouter } from "next/navigation";
 import { useState } from "react";
 import { remoteImageOptions } from "../lib/remoteImage";
 import type { ProductWithBestPrice } from "../types";
 import { formatPrice } from "../lib/utils";
+import { useAuth } from "../lib/auth";
 
 interface ProductCardProps {
   product: ProductWithBestPrice;
@@ -18,7 +20,11 @@ export default function ProductCard({
   featured = false,
 }: ProductCardProps) {
   const hasActiveOffer = product.best_price != null;
-  const [favorited, setFavorited] = useState(false);
+  const router = useRouter();
+  const { user, isLiked, toggleLike } = useAuth();
+  const [likePending, setLikePending] = useState(false);
+  const [likeError, setLikeError] = useState<string | null>(null);
+  const favorited = isLiked(product.id);
 
   const storeLogos = [
     product.best_store_logo_url
@@ -47,17 +53,39 @@ export default function ProductCard({
 
       <button
         type="button"
+        disabled={likePending}
         aria-label={favorited ? "Usun z ulubionych" : "Dodaj do ulubionych"}
-        onClick={(event) => {
+        onClick={async (event) => {
           event.preventDefault();
-          setFavorited((prev) => !prev);
+          event.stopPropagation();
+          if (!user) {
+            router.push("/login");
+            return;
+          }
+          setLikeError(null);
+          setLikePending(true);
+          try {
+            await toggleLike(product.id);
+          } catch (error) {
+            setLikeError(
+              error instanceof Error ? error.message : "Nie udalo sie zapisac ulubionych",
+            );
+          } finally {
+            setLikePending(false);
+          }
         }}
-        className="absolute right-3 top-3 z-10 flex h-8 w-8 items-center justify-center rounded-full bg-white/90 text-text-muted opacity-0 shadow-sm group-hover:opacity-100 hover:text-accent-red"
+        className="absolute right-3 top-3 z-10 flex h-8 w-8 items-center justify-center rounded-full bg-white/90 text-text-muted opacity-100 shadow-sm hover:text-accent-red disabled:cursor-not-allowed md:opacity-0 md:group-hover:opacity-100"
       >
         <Heart
           className={`h-4 w-4 ${favorited ? "fill-accent-red text-accent-red" : ""}`}
         />
       </button>
+
+      {likeError && (
+        <div className="absolute bottom-3 left-3 right-3 z-10 rounded-lg bg-accent-red/90 px-2 py-1 text-xs text-white">
+          {likeError}
+        </div>
+      )}
 
       <div
         className={`relative flex w-full items-center justify-center overflow-hidden bg-white ${

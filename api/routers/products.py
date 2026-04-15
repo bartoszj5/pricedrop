@@ -9,7 +9,7 @@ from sqlalchemy import case, func, or_
 from sqlmodel import SQLModel, Session, delete, select
 
 from shared.database import get_session
-from shared.models import Price, PriceHistory, Product, Store
+from shared.models import Price, PriceHistory, Product, ProductLike, Store
 
 SessionDep = Annotated[Session, Depends(get_session)]
 
@@ -605,6 +605,7 @@ def delete_product(slug: str, session: SessionDep) -> Response:
     if price_ids:
         session.exec(delete(PriceHistory).where(PriceHistory.price_id.in_(price_ids)))
 
+    session.exec(delete(ProductLike).where(ProductLike.product_id == product.id))
     session.exec(delete(Price).where(Price.product_id == product.id))
     session.exec(delete(Product).where(Product.id == product.id))
     session.commit()

@@ -1,5 +1,6 @@
 from datetime import timedelta
 from typing import Annotated
+from urllib.parse import urlparse
 
 from fastapi import APIRouter, Depends, HTTPException, Request, Response, status
 from fastapi.security import OAuth2PasswordRequestForm
@@ -61,7 +62,37 @@ class UserResponse(BaseModel):
     id: int
     username: str
     email: str
+    discord_webhook_url: str | None = None
     is_active: bool
+
+
+class UserSettingsUpdate(BaseModel):
+    discord_webhook_url: str | None = Field(default=None, max_length=1024)
+
+    @field_validator("discord_webhook_url")
+    @classmethod
+    def validate_discord_webhook_url(cls, value: str | None) -> str | None:
+        if value is None:
+            return None
+
+        normalized = value.strip()
+        if not normalized:
+            return None
+
+        parsed = urlparse(normalized)
+        if parsed.scheme not in {"http", "https"} or not parsed.netloc:
+            raise ValueError("discord_webhook_url must be a valid HTTP(S) URL")
+
+        allowed_prefixes = (
+            "https://discord.com/api/webhooks/",
+            "https://discordapp.com/api/webhooks/",
+            "http://discord.com/api/webhooks/",
+            "http://discordapp.com/api/webhooks/",
+        )
+        if not any(normalized.startswith(prefix) for prefix in allowed_prefixes):
+            raise ValueError("discord_webhook_url must be a Discord webhook URL")
+
+        return normalized
 
 
 @router.post("/register", response_model=UserResponse, status_code=status.HTTP_201_CREATED)
@@ -164,4 +195,17 @@ def logout(response: Response):
 
 @router.get("/me", response_model=UserResponse)
 def get_me(current_user: CurrentUser):
+    return current_user
+
+
+@router.patch("/me/settings", response_model=UserResponse)
+def update_me_settings(
+    data: UserSettingsUpdate,
+    current_user: CurrentUser,
+    session: SessionDep,
+):
+    current_user.discord_webhook_url = data.discord_webhook_url
+    session.add(current_user)
+    session.commit()
+    session.refresh(current_user)
     return current_user

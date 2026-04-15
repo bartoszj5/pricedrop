@@ -5,7 +5,6 @@ import { CatalogControlsFallback, PaginationFallback } from "./components/Catalo
 import ProductCard from "./components/ProductCard";
 import Pagination from "./components/Pagination";
 import EmptyState from "./components/EmptyState";
-import { isGameLikeCategory, isMainCatalogVisibleProduct } from "./lib/normalize";
 import type { ProductSort, ProductWithBestPrice } from "./types";
 
 export const dynamic = "force-dynamic";
@@ -34,10 +33,8 @@ export default async function Home({ searchParams }: PageProps) {
     getStores({ page_size: 100 }),
   ]);
 
-  const categories = (productsData.categories ?? []).filter(
-    (value) => !isGameLikeCategory(value),
-  );
-  const items = productsData.items.filter(isMainCatalogVisibleProduct);
+  const categories = productsData.categories ?? [];
+  const items = productsData.items;
 
   const featured: ProductWithBestPrice | null =
     page === 1
@@ -62,7 +59,7 @@ export default async function Home({ searchParams }: PageProps) {
       {items.length === 0 ? (
         <EmptyState
           message="Brak produktów dla tego zestawu filtrów"
-          detail="Spróbuj zmienić kategorię, sklep albo frazę wyszukiwania. Strona główna pokazuje elektronikę i produkty sklepowe — pełny katalog gier jest w zakładce Gry."
+          detail="Spróbuj zmienić kategorię, sklep albo frazę wyszukiwania."
           actionHref="/"
           actionLabel="Wróć do pełnego katalogu"
         />

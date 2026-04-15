@@ -112,6 +112,14 @@ services:
       DATABASE_URL: postgresql://${POSTGRES_USER:-pricedrop}:${POSTGRES_PASSWORD:-pricedrop}@postgres:5432/${POSTGRES_DB:-pricedrop}
       REDIS_URL: redis://redis:6379/2
       RABBITMQ_URL: amqp://${RABBITMQ_USER:-guest}:${RABBITMQ_PASS:-guest}@rabbitmq:5672/
+      SMTP_HOST: ${SMTP_HOST:-}
+      SMTP_PORT: ${SMTP_PORT:-587}
+      SMTP_USERNAME: ${SMTP_USERNAME:-}
+      SMTP_PASSWORD: ${SMTP_PASSWORD:-}
+      SMTP_FROM: ${SMTP_FROM:-}
+      SMTP_USE_TLS: ${SMTP_USE_TLS:-}
+      SMTP_STARTTLS: ${SMTP_STARTTLS:-1}
+      DISCORD_WEBHOOK_URL: ${DISCORD_WEBHOOK_URL:-}
       PYTHONPATH: /app
     depends_on:
       postgres:
