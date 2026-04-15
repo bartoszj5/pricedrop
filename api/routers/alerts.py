@@ -18,14 +18,14 @@ CurrentUser = Annotated[User, Depends(get_current_active_user)]
 
 class AlertCreate(BaseModel):
     product_id: int
-    target_price: Decimal
+    target_price: Decimal | None = None
     currency: str = "PLN"
 
 
 class AlertResponse(BaseModel):
     id: int
     product_id: int
-    target_price: Decimal
+    target_price: Decimal | None = None
     currency: str
     is_active: bool
     triggered_at: datetime | None = None

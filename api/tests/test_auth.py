@@ -65,6 +65,10 @@ def _auth_header(client: TestClient) -> dict:
     return {"Authorization": f"Bearer {token}"}
 
 
+def _like_product(client: TestClient, headers: dict, product_id: int = 1):
+    return client.post(f"/likes/{product_id}", headers=headers)
+
+
 # --- Registration ---
 
 
@@ -139,6 +143,59 @@ def test_me_returns_current_user(client: TestClient):
     assert resp.json()["username"] == "testuser"
 
 
+def test_me_includes_discord_webhook_field(client: TestClient):
+    headers = _auth_header(client)
+    resp = client.get("/auth/me", headers=headers)
+    assert resp.status_code == 200
+    assert resp.json()["discord_webhook_url"] is None
+
+
+def test_update_me_settings_updates_discord_webhook(client: TestClient):
+    headers = _auth_header(client)
+    webhook = "https://discord.com/api/webhooks/123/token"
+
+    resp = client.patch(
+        "/auth/me/settings",
+        headers=headers,
+        json={"discord_webhook_url": webhook},
+    )
+    assert resp.status_code == 200
+    assert resp.json()["discord_webhook_url"] == webhook
+
+    me = client.get("/auth/me", headers=headers)
+    assert me.status_code == 200
+    assert me.json()["discord_webhook_url"] == webhook
+
+
+def test_update_me_settings_can_clear_discord_webhook(client: TestClient):
+    headers = _auth_header(client)
+
+    set_resp = client.patch(
+        "/auth/me/settings",
+        headers=headers,
+        json={"discord_webhook_url": "https://discord.com/api/webhooks/123/token"},
+    )
+    assert set_resp.status_code == 200
+
+    clear_resp = client.patch(
+        "/auth/me/settings",
+        headers=headers,
+        json={"discord_webhook_url": ""},
+    )
+    assert clear_resp.status_code == 200
+    assert clear_resp.json()["discord_webhook_url"] is None
+
+
+def test_update_me_settings_rejects_invalid_webhook_url(client: TestClient):
+    headers = _auth_header(client)
+    resp = client.patch(
+        "/auth/me/settings",
+        headers=headers,
+        json={"discord_webhook_url": "https://example.com/not-a-discord-webhook"},
+    )
+    assert resp.status_code == 422
+
+
 def test_me_requires_auth(client: TestClient):
     resp = client.get("/auth/me")
     assert resp.status_code == 401
@@ -189,6 +246,84 @@ def test_logout_clears_cookie(client: TestClient):
 
 
 # --- Alerts (protected) ---
+
+
+def test_like_product_and_list_like_ids(client: TestClient):
+    headers = _auth_header(client)
+
+    like = _like_product(client, headers, product_id=1)
+    assert like.status_code == 200
+    assert like.json()["product_id"] == 1
+
+    ids = client.get("/likes/ids", headers=headers)
+    assert ids.status_code == 200
+    assert 1 in ids.json()
+
+
+def test_list_liked_products_returns_product_data(client: TestClient):
+    headers = _auth_header(client)
+    _like_product(client, headers, product_id=1)
+
+    response = client.get("/likes/products", headers=headers)
+    assert response.status_code == 200
+    payload = response.json()
+    assert len(payload) == 1
+    assert payload[0]["id"] == 1
+    assert payload[0]["slug"] == "test-product"
+    assert payload[0]["available_offers_count"] == 0
+
+
+def test_create_alert_without_prior_like(client: TestClient):
+    headers = _auth_header(client)
+
+    resp = client.post(
+        "/alerts/",
+        json={"product_id": 1, "target_price": "49.99"},
+        headers=headers,
+    )
+    assert resp.status_code == 201
+    assert resp.json()["target_price"] == "49.99"
+
+
+def test_create_alert_without_target_price_is_a_like(client: TestClient):
+    headers = _auth_header(client)
+
+    resp = client.post("/alerts/", json={"product_id": 1}, headers=headers)
+    assert resp.status_code == 201
+    assert resp.json()["target_price"] is None
+
+    ids = client.get("/likes/ids", headers=headers)
+    assert ids.status_code == 200
+    assert 1 in ids.json()
+
+
+def test_like_creates_alert_with_null_target(client: TestClient):
+    headers = _auth_header(client)
+    _like_product(client, headers, product_id=1)
+
+    alerts = client.get("/alerts/", headers=headers)
+    assert alerts.status_code == 200
+    payload = alerts.json()
+    assert len(payload) == 1
+    assert payload[0]["product_id"] == 1
+    assert payload[0]["target_price"] is None
+
+
+def test_unlike_deactivates_active_alert(client: TestClient):
+    headers = _auth_header(client)
+    created = client.post(
+        "/alerts/",
+        json={"product_id": 1, "target_price": "49.99"},
+        headers=headers,
+    )
+    assert created.status_code == 201
+
+    unlike = client.delete("/likes/1", headers=headers)
+    assert unlike.status_code == 204
+
+    active_alerts = client.get("/alerts/?is_active=true", headers=headers)
+    assert active_alerts.status_code == 200
+    assert active_alerts.json() == []
 
 
 def test_create_and_list_alerts(client: TestClient):

@@ -107,6 +107,8 @@ class User(SQLModel, table=True):
     email: str = Field(max_length=255, unique=True, index=True)
     username: str = Field(max_length=100, unique=True, index=True)
     hashed_password: str = Field(max_length=255)
+    discord_webhook_url: str | None = Field(default=None, max_length=1024)
+    notification_channel: str = Field(default="both", max_length=16)
     is_active: bool = Field(default=True)
     created_at: datetime = Field(
         default_factory=lambda: datetime.now(timezone.utc),
@@ -124,7 +126,9 @@ class Alert(SQLModel, table=True):
     id: int | None = Field(default=None, primary_key=True)
     user_id: int = Field(foreign_key="users.id", index=True)
     product_id: int = Field(foreign_key="products.id", index=True)
-    target_price: Decimal = Field(max_digits=10, decimal_places=2)
+    target_price: Decimal | None = Field(
+        default=None, max_digits=10, decimal_places=2
+    )
     currency: str = Field(default="PLN", max_length=3)
     is_active: bool = Field(default=True)
     triggered_at: datetime | None = Field(default=None)

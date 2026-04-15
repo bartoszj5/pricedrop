@@ -5,6 +5,7 @@ import {
   Heart,
   LogIn,
   LogOut,
+  Settings,
   ShoppingCart,
   TrendingDown,
   User,
@@ -18,7 +19,7 @@ import CategoryNav from "./CategoryNav";
 import ThemeToggle from "./ThemeToggle";
 
 export default function Navbar() {
-  const { user, loading, logout } = useAuth();
+  const { user, loading, logout, likedProductIds } = useAuth();
   const [menuOpen, setMenuOpen] = useState(false);
   const menuRef = useRef<HTMLDivElement>(null);
 
@@ -90,6 +91,14 @@ export default function Navbar() {
                           </p>
                         </div>
                       </div>
+                      <Link
+                        href="/settings"
+                        onClick={() => setMenuOpen(false)}
+                        className="flex items-center gap-2 border-b border-border px-4 py-3 text-sm font-semibold text-text-secondary hover:bg-bg-tertiary hover:text-text-primary"
+                      >
+                        <Settings className="h-4 w-4" />
+                        Ustawienia
+                      </Link>
                       <button
                         type="button"
                         onClick={() => {
@@ -126,13 +135,22 @@ export default function Navbar() {
               )}
             </div>
 
-            <button
-              type="button"
+            <Link
+              href={user ? "/likes" : "/login"}
               aria-label="Ulubione"
-              className="flex h-10 w-10 items-center justify-center rounded-full text-text-secondary hover:bg-bg-tertiary hover:text-text-primary"
+              className="relative flex h-10 w-10 items-center justify-center rounded-full text-text-secondary hover:bg-bg-tertiary hover:text-text-primary"
             >
-              <Heart className="h-5 w-5" />
-            </button>
+              <Heart
+                className={`h-5 w-5 ${
+                  likedProductIds.length > 0 ? "fill-accent-red text-accent-red" : ""
+                }`}
+              />
+              {user && likedProductIds.length > 0 && (
+                <span className="absolute -right-1 -top-1 min-w-[18px] rounded-full bg-accent-red px-1.5 text-center text-[10px] font-bold leading-[18px] text-white">
+                  {likedProductIds.length > 99 ? "99+" : likedProductIds.length}
+                </span>
+              )}
+            </Link>
 
             <button
               type="button"

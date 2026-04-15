@@ -1,3 +1,3 @@
-from . import dedup, itad, prices, products, stores
+from . import dedup, itad, likes, prices, products, stores
 
-__all__ = ["products", "stores", "prices", "itad", "dedup"]
+__all__ = ["products", "stores", "prices", "itad", "dedup", "likes"]

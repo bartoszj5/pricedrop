@@ -7,7 +7,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from itad_scheduler import itad_sync_loop
-from routers import alerts, auth, dedup, itad, prices, products, stores
+from routers import alerts, auth, dedup, itad, likes, prices, products, stores
 
 logging.basicConfig(
     level=os.getenv("LOG_LEVEL", "INFO").upper(),
@@ -58,6 +58,7 @@ app.include_router(stores.router)
 app.include_router(prices.router)
 app.include_router(itad.router)
 app.include_router(alerts.router)
+app.include_router(likes.router)
 
 
 @app.get("/health")
