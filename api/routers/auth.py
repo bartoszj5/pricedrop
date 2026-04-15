@@ -58,16 +58,21 @@ class UserRegister(BaseModel):
         return v
 
 
+NOTIFICATION_CHANNELS = {"email", "discord", "both"}
+
+
 class UserResponse(BaseModel):
     id: int
     username: str
     email: str
     discord_webhook_url: str | None = None
+    notification_channel: str = "both"
     is_active: bool
 
 
 class UserSettingsUpdate(BaseModel):
     discord_webhook_url: str | None = Field(default=None, max_length=1024)
+    notification_channel: str | None = Field(default=None, max_length=16)
 
     @field_validator("discord_webhook_url")
     @classmethod
@@ -80,19 +85,28 @@ class UserSettingsUpdate(BaseModel):
             return None
 
         parsed = urlparse(normalized)
-        if parsed.scheme not in {"http", "https"} or not parsed.netloc:
-            raise ValueError("discord_webhook_url must be a valid HTTP(S) URL")
+        if parsed.scheme != "https" or not parsed.netloc:
+            raise ValueError("discord_webhook_url must be an HTTPS URL")
 
         allowed_prefixes = (
             "https://discord.com/api/webhooks/",
             "https://discordapp.com/api/webhooks/",
-            "http://discord.com/api/webhooks/",
-            "http://discordapp.com/api/webhooks/",
         )
         if not any(normalized.startswith(prefix) for prefix in allowed_prefixes):
             raise ValueError("discord_webhook_url must be a Discord webhook URL")
 
         return normalized
+
+    @field_validator("notification_channel")
+    @classmethod
+    def validate_notification_channel(cls, value: str | None) -> str | None:
+        if value is None:
+            return None
+        if value not in NOTIFICATION_CHANNELS:
+            raise ValueError(
+                f"notification_channel must be one of: {sorted(NOTIFICATION_CHANNELS)}"
+            )
+        return value
 
 
 @router.post("/register", response_model=UserResponse, status_code=status.HTTP_201_CREATED)
@@ -204,7 +218,20 @@ def update_me_settings(
     current_user: CurrentUser,
     session: SessionDep,
 ):
-    current_user.discord_webhook_url = data.discord_webhook_url
+    payload = data.model_dump(exclude_unset=True)
+    if "discord_webhook_url" in payload:
+        current_user.discord_webhook_url = payload["discord_webhook_url"]
+    if "notification_channel" in payload and payload["notification_channel"] is not None:
+        current_user.notification_channel = payload["notification_channel"]
+
+    channel = current_user.notification_channel
+    if channel in {"discord", "both"} and not current_user.discord_webhook_url:
+        if channel == "discord":
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Cannot select discord channel without a Discord webhook URL",
+            )
+
     session.add(current_user)
     session.commit()
     session.refresh(current_user)

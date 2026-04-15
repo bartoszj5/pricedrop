@@ -3,22 +3,31 @@
 import { Link2, LogIn, Save, Settings2 } from "lucide-react";
 import Link from "next/link";
 import { useEffect, useState } from "react";
-import { useAuth } from "../lib/auth";
+import { useAuth, type NotificationChannel } from "../lib/auth";
 
 function isDiscordWebhookUrl(value: string): boolean {
-  return /^https?:\/\/(discord(?:app)?\.com)\/api\/webhooks\/.+/i.test(value);
+  return /^https:\/\/(discord(?:app)?\.com)\/api\/webhooks\/.+/i.test(value);
 }
+
+const CHANNEL_OPTIONS: { value: NotificationChannel; label: string; hint: string }[] = [
+  { value: "email", label: "Email", hint: "Tylko na Twoj email" },
+  { value: "discord", label: "Discord", hint: "Tylko przez Discord webhook" },
+  { value: "both", label: "Oba kanaly", hint: "Email i Discord rownoczesnie" },
+];
 
 export default function SettingsPage() {
   const { user, loading, updateSettings } = useAuth();
   const [discordWebhookUrl, setDiscordWebhookUrl] = useState("");
+  const [notificationChannel, setNotificationChannel] =
+    useState<NotificationChannel>("both");
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
 
   useEffect(() => {
     setDiscordWebhookUrl(user?.discord_webhook_url ?? "");
-  }, [user?.discord_webhook_url]);
+    setNotificationChannel(user?.notification_channel ?? "both");
+  }, [user?.discord_webhook_url, user?.notification_channel]);
 
   async function handleSubmit(event: React.FormEvent) {
     event.preventDefault();
@@ -27,7 +36,12 @@ export default function SettingsPage() {
 
     const normalized = discordWebhookUrl.trim();
     if (normalized && !isDiscordWebhookUrl(normalized)) {
-      setError("Podaj poprawny Discord webhook URL");
+      setError("Podaj poprawny Discord webhook URL (https://)");
+      return;
+    }
+
+    if (notificationChannel === "discord" && !normalized) {
+      setError("Kanal Discord wymaga ustawienia webhook URL");
       return;
     }
 
@@ -35,12 +49,9 @@ export default function SettingsPage() {
     try {
       await updateSettings({
         discord_webhook_url: normalized || null,
+        notification_channel: notificationChannel,
       });
-      setSuccess(
-        normalized
-          ? "Webhook zapisany. Alerty beda wysylane na Discord."
-          : "Webhook usuniety.",
-      );
+      setSuccess("Ustawienia zapisane.");
     } catch (err) {
       setError(err instanceof Error ? err.message : "Nie udalo sie zapisac ustawien");
     } finally {
@@ -128,6 +139,33 @@ export default function SettingsPage() {
           <p className="text-xs text-text-muted">
             Pole mozesz zostawic puste, jesli nie chcesz dostawac alertow na Discord.
           </p>
+
+          <fieldset className="flex flex-col gap-2">
+            <legend className="mb-1 text-sm font-semibold text-text-secondary">
+              Gdzie wysylac alerty?
+            </legend>
+            {CHANNEL_OPTIONS.map((opt) => (
+              <label
+                key={opt.value}
+                className="flex cursor-pointer items-start gap-3 rounded-2xl border border-border bg-bg-card px-4 py-3 hover:border-accent/40"
+              >
+                <input
+                  type="radio"
+                  name="notification_channel"
+                  value={opt.value}
+                  checked={notificationChannel === opt.value}
+                  onChange={() => setNotificationChannel(opt.value)}
+                  className="mt-1 accent-accent"
+                />
+                <span className="flex flex-col">
+                  <span className="text-sm font-semibold text-text-primary">
+                    {opt.label}
+                  </span>
+                  <span className="text-xs text-text-muted">{opt.hint}</span>
+                </span>
+              </label>
+            ))}
+          </fieldset>
 
           <div className="flex justify-end">
             <button

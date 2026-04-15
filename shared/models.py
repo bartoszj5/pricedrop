@@ -109,6 +109,7 @@ class User(SQLModel, table=True):
     username: str = Field(max_length=100, unique=True, index=True)
     hashed_password: str = Field(max_length=255)
     discord_webhook_url: str | None = Field(default=None, max_length=1024)
+    notification_channel: str = Field(default="both", max_length=16)
     is_active: bool = Field(default=True)
     created_at: datetime = Field(
         default_factory=lambda: datetime.now(timezone.utc),

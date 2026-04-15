@@ -16,7 +16,7 @@ from fastapi import FastAPI
 from sqlmodel import Session, select
 
 from shared.database import get_engine
-from shared.models import Alert, Product, ProductLike, User
+from shared.models import Alert, ProductLike, User
 
 logging.basicConfig(
     level=os.getenv("LOG_LEVEL", "INFO").upper(),
@@ -63,6 +63,16 @@ class PriceDroppedEvent:
     old_price: Decimal
     new_price: Decimal
     url: str
+
+
+@dataclass(slots=True)
+class _AlertMatch:
+    alert_id: int
+    target_price: Decimal
+    user_id: int
+    user_email: str
+    user_webhook_url: str | None
+    user_notification_channel: str
 
 
 def _to_decimal(value: Any) -> Decimal:
@@ -177,41 +187,43 @@ async def _send_discord_notification(
 
 
 async def _notify_user(
-    user: User,
+    match: _AlertMatch,
     event: PriceDroppedEvent,
-    target_price: Decimal,
 ) -> bool:
+    channel = match.user_notification_channel or "both"
+    webhook_url = (match.user_webhook_url or "").strip()
+
+    wants_discord = channel in {"discord", "both"} and bool(webhook_url)
+    wants_email = channel in {"email", "both"} and _smtp_configured()
+
     delivery_results: list[bool] = []
-
-    webhook_url = (user.discord_webhook_url or "").strip()
-    if webhook_url:
+    if wants_discord:
         delivery_results.append(
-            await _send_discord_notification(webhook_url, event, target_price)
+            await _send_discord_notification(webhook_url, event, match.target_price)
         )
-
-    if _smtp_configured():
+    if wants_email:
         delivery_results.append(
-            await _send_email_notification(user.email, event, target_price)
+            await _send_email_notification(match.user_email, event, match.target_price)
         )
 
     if not delivery_results:
         logger.warning(
-            "No notification channel configured for user_id=%s (alert target reached)",
-            user.id,
+            "No notification channel available for user_id=%s (channel=%s, alert target reached)",
+            match.user_id,
+            channel,
         )
         return False
 
     return any(delivery_results)
 
 
-async def _process_price_drop_event(event: PriceDroppedEvent) -> tuple[int, int]:
-    delivered = 0
+async def _process_price_drop_event(event: PriceDroppedEvent) -> tuple[int, int, int]:
+    engine = get_engine()
 
-    with Session(get_engine()) as session:
+    with Session(engine) as session:
         stmt = (
-            select(Alert, User, Product)
+            select(Alert, User)
             .join(User, User.id == Alert.user_id)
-            .join(Product, Product.id == Alert.product_id)
             .join(
                 ProductLike,
                 (ProductLike.user_id == Alert.user_id)
@@ -224,22 +236,44 @@ async def _process_price_drop_event(event: PriceDroppedEvent) -> tuple[int, int]
                 Alert.target_price >= event.new_price,
             )
         )
-        matches = session.exec(stmt).all()
+        rows = session.exec(stmt).all()
+        matches = [
+            _AlertMatch(
+                alert_id=alert.id,
+                target_price=alert.target_price,
+                user_id=user.id,
+                user_email=user.email,
+                user_webhook_url=user.discord_webhook_url,
+                user_notification_channel=user.notification_channel or "both",
+            )
+            for alert, user in rows
+        ]
 
-        if not matches:
-            return 0, 0
+    if not matches:
+        return 0, 0, 0
 
-        for alert, user, _product in matches:
-            sent = await _notify_user(user, event, alert.target_price)
-            if sent:
-                alert.triggered_at = datetime.now(timezone.utc)
+    delivered_ids: list[int] = []
+    failed_count = 0
+    for match in matches:
+        sent = await _notify_user(match, event)
+        if sent:
+            delivered_ids.append(match.alert_id)
+        else:
+            failed_count += 1
+
+    if delivered_ids:
+        now = datetime.now(timezone.utc)
+        with Session(engine) as session:
+            for alert_id in delivered_ids:
+                alert = session.get(Alert, alert_id)
+                if alert is None:
+                    continue
+                alert.triggered_at = now
                 alert.is_active = False
                 session.add(alert)
-                delivered += 1
+            session.commit()
 
-        session.commit()
-
-    return len(matches), delivered
+    return len(matches), len(delivered_ids), failed_count
 
 
 async def _consume_price_dropped(stop_event: asyncio.Event) -> None:
@@ -272,18 +306,36 @@ async def _consume_price_dropped(stop_event: asyncio.Event) -> None:
                         if stop_event.is_set():
                             break
 
-                        async with message.process(requeue=False):
-                            event = _parse_price_drop_event(message.body)
-                            if event is None:
-                                continue
+                        event = _parse_price_drop_event(message.body)
+                        if event is None:
+                            await message.ack()
+                            continue
 
-                            matched, delivered = await _process_price_drop_event(event)
-                            logger.info(
-                                "Processed price.dropped for product_id=%s (matched_alerts=%s, delivered=%s)",
-                                event.product_id,
-                                matched,
-                                delivered,
+                        try:
+                            matched, delivered, failed = await _process_price_drop_event(
+                                event
                             )
+                        except Exception:
+                            logger.exception(
+                                "Unhandled error processing price.dropped for product_id=%s",
+                                event.product_id,
+                            )
+                            await message.nack(requeue=not message.redelivered)
+                            continue
+
+                        logger.info(
+                            "Processed price.dropped for product_id=%s (matched_alerts=%s, delivered=%s, failed=%s, redelivered=%s)",
+                            event.product_id,
+                            matched,
+                            delivered,
+                            failed,
+                            message.redelivered,
+                        )
+
+                        if failed and not message.redelivered:
+                            await message.nack(requeue=True)
+                        else:
+                            await message.ack()
         except asyncio.CancelledError:
             raise
         except Exception as exc:

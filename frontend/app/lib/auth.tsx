@@ -9,11 +9,14 @@ import {
   useState,
 } from "react";
 
+export type NotificationChannel = "email" | "discord" | "both";
+
 export interface AuthUser {
   id: number;
   username: string;
   email: string;
   discord_webhook_url: string | null;
+  notification_channel: NotificationChannel;
   is_active: boolean;
 }
 
@@ -22,7 +25,10 @@ interface AuthContextValue {
   loading: boolean;
   login: (username: string, password: string) => Promise<void>;
   register: (username: string, email: string, password: string) => Promise<void>;
-  updateSettings: (settings: { discord_webhook_url: string | null }) => Promise<AuthUser>;
+  updateSettings: (settings: {
+    discord_webhook_url?: string | null;
+    notification_channel?: NotificationChannel;
+  }) => Promise<AuthUser>;
   likedProductIds: number[];
   isLiked: (productId: number) => boolean;
   likeProduct: (productId: number) => Promise<void>;
@@ -212,10 +218,17 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     await likeProduct(productId);
   }, [likedProductIds, likeProduct, unlikeProduct]);
 
-  const updateSettings = useCallback(async (settings: { discord_webhook_url: string | null }) => {
-    const payload = {
-      discord_webhook_url: settings.discord_webhook_url?.trim() || null,
-    };
+  const updateSettings = useCallback(async (settings: {
+    discord_webhook_url?: string | null;
+    notification_channel?: NotificationChannel;
+  }) => {
+    const payload: Record<string, unknown> = {};
+    if (settings.discord_webhook_url !== undefined) {
+      payload.discord_webhook_url = settings.discord_webhook_url?.trim() || null;
+    }
+    if (settings.notification_channel !== undefined) {
+      payload.notification_channel = settings.notification_channel;
+    }
     const updated = await apiFetch<AuthUser>("/auth/me/settings", {
       method: "PATCH",
       body: JSON.stringify(payload),
