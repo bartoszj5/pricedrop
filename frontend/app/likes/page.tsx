@@ -6,41 +6,8 @@ import { useEffect, useState } from "react";
 
 import ProductCard from "../components/ProductCard";
 import EmptyState from "../components/EmptyState";
-import { useAuth } from "../lib/auth";
+import { apiFetch, useAuth } from "../lib/auth";
 import type { ProductWithBestPrice } from "../types";
-
-function isLoopbackHost(hostname: string): boolean {
-  return hostname === "localhost" || hostname === "127.0.0.1" || hostname === "[::1]";
-}
-
-function normalizeApiBase(base: string): string {
-  return base.endsWith("/") ? base.slice(0, -1) : base;
-}
-
-function resolveApiBase(): string {
-  if (typeof window === "undefined") return "";
-
-  const configured = process.env.NEXT_PUBLIC_API_URL?.trim();
-  const currentHost = window.location.hostname;
-
-  if (configured) {
-    if (/^https?:\/\//i.test(configured)) {
-      try {
-        const configuredHost = new URL(configured).hostname;
-        if (isLoopbackHost(configuredHost) && !isLoopbackHost(currentHost)) {
-          return `${window.location.protocol}//${currentHost}:8000`;
-        }
-      } catch {
-        // Ignore parse errors and fall back to configured value.
-      }
-    }
-    return normalizeApiBase(configured);
-  }
-
-  return `${window.location.protocol}//${currentHost}:8000`;
-}
-
-const API_BASE = resolveApiBase();
 
 type LikedProductResponse = ProductWithBestPrice & {
   liked_at: string;
@@ -66,14 +33,7 @@ export default function LikesPage() {
       setFetching(true);
       setError(null);
       try {
-        const res = await fetch(`${API_BASE}/likes/products`, {
-          credentials: "include",
-        });
-        if (!res.ok) {
-          const body = await res.json().catch(() => null);
-          throw new Error(body?.detail ?? `Request failed (${res.status})`);
-        }
-        const data = (await res.json()) as LikedProductResponse[];
+        const data = await apiFetch<LikedProductResponse[]>("/likes/products");
         if (!cancelled) {
           setItems(data);
         }

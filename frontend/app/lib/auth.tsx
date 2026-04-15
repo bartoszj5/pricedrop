@@ -93,7 +93,7 @@ async function tryRefresh(): Promise<boolean> {
   }
 }
 
-async function apiFetch<T>(
+export async function apiFetch<T>(
   path: string,
   options: RequestInit = {},
 ): Promise<T> {
@@ -168,7 +168,6 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
   const refreshLikes = useCallback(async () => {
     if (!user) {
-      setLikedProductIds([]);
       return [];
     }
 
@@ -184,11 +183,10 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   }, [user]);
 
   useEffect(() => {
-    if (!user) {
-      setLikedProductIds([]);
-      return;
-    }
-    refreshLikes();
+    if (!user) return;
+    queueMicrotask(() => {
+      void refreshLikes();
+    });
   }, [user, refreshLikes]);
 
   const likeProduct = useCallback(async (productId: number) => {

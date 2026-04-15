@@ -37,7 +37,6 @@ SMTP_PORT = int(os.getenv("SMTP_PORT", "587"))
 SMTP_USERNAME = os.getenv("SMTP_USERNAME", "").strip()
 SMTP_PASSWORD = os.getenv("SMTP_PASSWORD", "").strip()
 SMTP_FROM = os.getenv("SMTP_FROM", "").strip()
-DEFAULT_DISCORD_WEBHOOK_URL = os.getenv("DISCORD_WEBHOOK_URL", "").strip()
 
 
 def _read_bool_env(name: str, default: bool) -> bool:
@@ -184,7 +183,7 @@ async def _notify_user(
 ) -> bool:
     delivery_results: list[bool] = []
 
-    webhook_url = (user.discord_webhook_url or DEFAULT_DISCORD_WEBHOOK_URL).strip()
+    webhook_url = (user.discord_webhook_url or "").strip()
     if webhook_url:
         delivery_results.append(
             await _send_discord_notification(webhook_url, event, target_price)

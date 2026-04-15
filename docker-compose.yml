@@ -119,7 +119,6 @@ services:
       SMTP_FROM: ${SMTP_FROM:-}
       SMTP_USE_TLS: ${SMTP_USE_TLS:-}
       SMTP_STARTTLS: ${SMTP_STARTTLS:-1}
-      DISCORD_WEBHOOK_URL: ${DISCORD_WEBHOOK_URL:-}
       PYTHONPATH: /app
     depends_on:
       postgres:
