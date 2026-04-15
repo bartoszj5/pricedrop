@@ -8,7 +8,7 @@ from sqlmodel import Session, select
 
 from dependencies.auth import get_current_active_user
 from shared.database import get_session
-from shared.models import Alert, Product, ProductLike, User
+from shared.models import Alert, Product, User
 
 router = APIRouter(prefix="/alerts", tags=["alerts"])
 
@@ -18,14 +18,14 @@ CurrentUser = Annotated[User, Depends(get_current_active_user)]
 
 class AlertCreate(BaseModel):
     product_id: int
-    target_price: Decimal
+    target_price: Decimal | None = None
     currency: str = "PLN"
 
 
 class AlertResponse(BaseModel):
     id: int
     product_id: int
-    target_price: Decimal
+    target_price: Decimal | None = None
     currency: str
     is_active: bool
     triggered_at: datetime | None = None
@@ -50,18 +50,6 @@ def create_alert(data: AlertCreate, current_user: CurrentUser, session: SessionD
     product = session.get(Product, data.product_id)
     if not product:
         raise HTTPException(status_code=404, detail="Product not found")
-
-    liked = session.exec(
-        select(ProductLike).where(
-            ProductLike.user_id == current_user.id,
-            ProductLike.product_id == data.product_id,
-        )
-    ).first()
-    if not liked:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Product must be liked before creating an alert",
-        )
 
     existing = session.exec(
         select(Alert).where(

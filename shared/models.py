@@ -29,7 +29,6 @@ class Product(SQLModel, table=True):
 
     prices: list["Price"] = Relationship(back_populates="product")
     alerts: list["Alert"] = Relationship(back_populates="product")
-    likes: list["ProductLike"] = Relationship(back_populates="product")
 
 
 # --- Store ---
@@ -116,7 +115,6 @@ class User(SQLModel, table=True):
     )
 
     alerts: list["Alert"] = Relationship(back_populates="user")
-    likes: list["ProductLike"] = Relationship(back_populates="user")
 
 
 # --- Alert ---
@@ -128,7 +126,9 @@ class Alert(SQLModel, table=True):
     id: int | None = Field(default=None, primary_key=True)
     user_id: int = Field(foreign_key="users.id", index=True)
     product_id: int = Field(foreign_key="products.id", index=True)
-    target_price: Decimal = Field(max_digits=10, decimal_places=2)
+    target_price: Decimal | None = Field(
+        default=None, max_digits=10, decimal_places=2
+    )
     currency: str = Field(default="PLN", max_length=3)
     is_active: bool = Field(default=True)
     triggered_at: datetime | None = Field(default=None)
@@ -138,23 +138,3 @@ class Alert(SQLModel, table=True):
 
     user: User = Relationship(back_populates="alerts")
     product: Product = Relationship(back_populates="alerts")
-
-
-# --- ProductLike ---
-
-
-class ProductLike(SQLModel, table=True):
-    __tablename__ = "product_likes"
-    __table_args__ = (
-        UniqueConstraint("user_id", "product_id", name="uq_product_like_user_product"),
-    )
-
-    id: int | None = Field(default=None, primary_key=True)
-    user_id: int = Field(foreign_key="users.id", index=True)
-    product_id: int = Field(foreign_key="products.id", index=True)
-    created_at: datetime = Field(
-        default_factory=lambda: datetime.now(timezone.utc),
-    )
-
-    user: User = Relationship(back_populates="likes")
-    product: Product = Relationship(back_populates="likes")

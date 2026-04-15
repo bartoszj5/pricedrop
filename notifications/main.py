@@ -16,7 +16,7 @@ from fastapi import FastAPI
 from sqlmodel import Session, select
 
 from shared.database import get_engine
-from shared.models import Alert, ProductLike, User
+from shared.models import Alert, User
 
 logging.basicConfig(
     level=os.getenv("LOG_LEVEL", "INFO").upper(),
@@ -68,7 +68,7 @@ class PriceDroppedEvent:
 @dataclass(slots=True)
 class _AlertMatch:
     alert_id: int
-    target_price: Decimal
+    target_price: Decimal | None
     user_id: int
     user_email: str
     user_webhook_url: str | None
@@ -115,7 +115,7 @@ def _smtp_configured() -> bool:
 async def _send_email_notification(
     recipient_email: str,
     event: PriceDroppedEvent,
-    target_price: Decimal,
+    target_price: Decimal | None,
 ) -> bool:
     if not _smtp_configured():
         return False
@@ -126,14 +126,24 @@ async def _send_email_notification(
     message["Subject"] = (
         f"PriceDrop alert: {event.product_title} is now {_format_price(event.new_price)} PLN"
     )
+    intro = (
+        "Price dropped below your target."
+        if target_price is not None
+        else "Price dropped on a product you follow."
+    )
+    target_line = (
+        f"Your target: {_format_price(target_price)} PLN"
+        if target_price is not None
+        else "Your target: any drop"
+    )
     message.set_content(
         "\n".join(
             [
-                "Price dropped below your target.",
+                intro,
                 "",
                 f"Product: {event.product_title}",
                 f"Store: {event.store}",
-                f"Your target: {_format_price(target_price)} PLN",
+                target_line,
                 f"Previous price: {_format_price(event.old_price)} PLN",
                 f"Current price: {_format_price(event.new_price)} PLN",
                 f"Offer URL: {event.url or 'N/A'}",
@@ -161,14 +171,19 @@ async def _send_email_notification(
 async def _send_discord_notification(
     webhook_url: str,
     event: PriceDroppedEvent,
-    target_price: Decimal,
+    target_price: Decimal | None,
 ) -> bool:
+    target_line = (
+        f"Target: **{_format_price(target_price)} PLN**"
+        if target_price is not None
+        else "Target: **any drop**"
+    )
     payload = {
         "content": "\n".join(
             [
                 f"Price alert: **{event.product_title}**",
                 f"Store: **{event.store}**",
-                f"Target: **{_format_price(target_price)} PLN**",
+                target_line,
                 f"Old: ~~{_format_price(event.old_price)} PLN~~",
                 f"Now: **{_format_price(event.new_price)} PLN**",
                 event.url,
@@ -224,16 +239,11 @@ async def _process_price_drop_event(event: PriceDroppedEvent) -> tuple[int, int,
         stmt = (
             select(Alert, User)
             .join(User, User.id == Alert.user_id)
-            .join(
-                ProductLike,
-                (ProductLike.user_id == Alert.user_id)
-                & (ProductLike.product_id == Alert.product_id),
-            )
             .where(
                 Alert.product_id == event.product_id,
                 Alert.is_active == True,  # noqa: E712
-                Alert.triggered_at.is_(None),
-                Alert.target_price >= event.new_price,
+                (Alert.target_price.is_(None))
+                | (Alert.target_price >= event.new_price),
             )
         )
         rows = session.exec(stmt).all()
@@ -269,7 +279,8 @@ async def _process_price_drop_event(event: PriceDroppedEvent) -> tuple[int, int,
                 if alert is None:
                     continue
                 alert.triggered_at = now
-                alert.is_active = False
+                if alert.target_price is not None:
+                    alert.is_active = False
                 session.add(alert)
             session.commit()
 

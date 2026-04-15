@@ -273,7 +273,7 @@ def test_list_liked_products_returns_product_data(client: TestClient):
     assert payload[0]["available_offers_count"] == 0
 
 
-def test_create_alert_requires_liked_product(client: TestClient):
+def test_create_alert_without_prior_like(client: TestClient):
     headers = _auth_header(client)
 
     resp = client.post(
@@ -281,13 +281,36 @@ def test_create_alert_requires_liked_product(client: TestClient):
         json={"product_id": 1, "target_price": "49.99"},
         headers=headers,
     )
-    assert resp.status_code == 400
+    assert resp.status_code == 201
+    assert resp.json()["target_price"] == "49.99"
+
+
+def test_create_alert_without_target_price_is_a_like(client: TestClient):
+    headers = _auth_header(client)
+
+    resp = client.post("/alerts/", json={"product_id": 1}, headers=headers)
+    assert resp.status_code == 201
+    assert resp.json()["target_price"] is None
+
+    ids = client.get("/likes/ids", headers=headers)
+    assert ids.status_code == 200
+    assert 1 in ids.json()
+
+
+def test_like_creates_alert_with_null_target(client: TestClient):
+    headers = _auth_header(client)
+    _like_product(client, headers, product_id=1)
+
+    alerts = client.get("/alerts/", headers=headers)
+    assert alerts.status_code == 200
+    payload = alerts.json()
+    assert len(payload) == 1
+    assert payload[0]["product_id"] == 1
+    assert payload[0]["target_price"] is None
 
 
 def test_unlike_deactivates_active_alert(client: TestClient):
     headers = _auth_header(client)
-    _like_product(client, headers, product_id=1)
-
     created = client.post(
         "/alerts/",
         json={"product_id": 1, "target_price": "49.99"},
@@ -305,7 +328,6 @@ def test_unlike_deactivates_active_alert(client: TestClient):
 
 def test_create_and_list_alerts(client: TestClient):
     headers = _auth_header(client)
-    _like_product(client, headers, product_id=1)
 
     resp = client.post("/alerts/", json={
         "product_id": 1,
@@ -322,7 +344,6 @@ def test_create_and_list_alerts(client: TestClient):
 
 def test_create_alert_duplicate_rejected(client: TestClient):
     headers = _auth_header(client)
-    _like_product(client, headers, product_id=1)
     client.post("/alerts/", json={"product_id": 1, "target_price": "49.99"}, headers=headers)
     resp = client.post("/alerts/", json={"product_id": 1, "target_price": "39.99"}, headers=headers)
     assert resp.status_code == 409
@@ -330,7 +351,6 @@ def test_create_alert_duplicate_rejected(client: TestClient):
 
 def test_delete_alert(client: TestClient):
     headers = _auth_header(client)
-    _like_product(client, headers, product_id=1)
     resp = client.post("/alerts/", json={"product_id": 1, "target_price": "49.99"}, headers=headers)
     alert_id = resp.json()["id"]
 
@@ -343,7 +363,6 @@ def test_delete_alert(client: TestClient):
 
 def test_deactivate_alert(client: TestClient):
     headers = _auth_header(client)
-    _like_product(client, headers, product_id=1)
     resp = client.post("/alerts/", json={"product_id": 1, "target_price": "49.99"}, headers=headers)
     alert_id = resp.json()["id"]
 

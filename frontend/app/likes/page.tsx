@@ -103,7 +103,7 @@ export default function LikesPage() {
           <span className="eyebrow">Twoje konto</span>
           <h1 className="display-title mt-1 text-4xl text-text-primary">Ulubione produkty</h1>
           <p className="mt-2 text-sm text-text-secondary">
-            Produkty, ktore polubiles. Alerty cenowe dzialaja tylko dla pozycji z tej listy.
+            Produkty, ktore obserwujesz. Powiadomimy Cie o kazdym spadku ceny.
           </p>
         </div>
         <div className="paper-chip">
@@ -115,7 +115,7 @@ export default function LikesPage() {
       {items.length === 0 ? (
         <EmptyState
           message="Nie masz jeszcze ulubionych produktow"
-          detail="Polub dowolny produkt ikona serca, aby pojawil sie tutaj i mogl otrzymywac alerty cenowe."
+          detail="Polub dowolny produkt ikona serca, aby pojawil sie tutaj i dostawac powiadomienia o spadkach ceny."
           actionHref="/"
           actionLabel="Przegladaj katalog"
         />

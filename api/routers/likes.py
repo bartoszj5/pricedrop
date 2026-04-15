@@ -8,7 +8,7 @@ from sqlmodel import Session, select
 
 from dependencies.auth import get_current_active_user
 from shared.database import get_session
-from shared.models import Alert, Price, Product, ProductLike, Store, User
+from shared.models import Alert, Price, Product, Store, User
 
 router = APIRouter(prefix="/likes", tags=["likes"])
 
@@ -43,22 +43,45 @@ class LikedProductRead(BaseModel):
     liked_at: datetime
 
 
+def _active_alert(session: Session, user_id: int, product_id: int) -> Alert | None:
+    return session.exec(
+        select(Alert).where(
+            Alert.user_id == user_id,
+            Alert.product_id == product_id,
+            Alert.is_active == True,  # noqa: E712
+        )
+    ).first()
+
+
 @router.get("/", response_model=list[ProductLikeResponse])
 def list_likes(current_user: CurrentUser, session: SessionDep):
-    likes = session.exec(
-        select(ProductLike)
-        .where(ProductLike.user_id == current_user.id)
-        .order_by(ProductLike.created_at.desc())
+    alerts = session.exec(
+        select(Alert)
+        .where(
+            Alert.user_id == current_user.id,
+            Alert.is_active == True,  # noqa: E712
+        )
+        .order_by(Alert.created_at.desc())
     ).all()
-    return likes
+    return [
+        ProductLikeResponse(
+            id=alert.id,
+            product_id=alert.product_id,
+            created_at=alert.created_at,
+        )
+        for alert in alerts
+    ]
 
 
 @router.get("/ids", response_model=list[int])
 def list_like_ids(current_user: CurrentUser, session: SessionDep):
     return session.exec(
-        select(ProductLike.product_id)
-        .where(ProductLike.user_id == current_user.id)
-        .order_by(ProductLike.created_at.desc())
+        select(Alert.product_id)
+        .where(
+            Alert.user_id == current_user.id,
+            Alert.is_active == True,  # noqa: E712
+        )
+        .order_by(Alert.created_at.desc())
     ).all()
 
 
@@ -112,17 +135,20 @@ def list_liked_products(current_user: CurrentUser, session: SessionDep):
             func.coalesce(price_stats.c.available_offers_count, 0).label(
                 "available_offers_count"
             ),
-            ProductLike.created_at.label("liked_at"),
+            Alert.created_at.label("liked_at"),
         )
-        .join(ProductLike, ProductLike.product_id == Product.id)
+        .join(Alert, Alert.product_id == Product.id)
         .outerjoin(price_stats, price_stats.c.product_id == Product.id)
         .outerjoin(
             ranked_best_prices,
             (ranked_best_prices.c.product_id == Product.id)
             & (ranked_best_prices.c.rn == 1),
         )
-        .where(ProductLike.user_id == current_user.id)
-        .order_by(ProductLike.created_at.desc(), Product.title.asc())
+        .where(
+            Alert.user_id == current_user.id,
+            Alert.is_active == True,  # noqa: E712
+        )
+        .order_by(Alert.created_at.desc(), Product.title.asc())
     ).all()
 
     return [
@@ -165,34 +191,31 @@ def like_product(product_id: int, current_user: CurrentUser, session: SessionDep
     if not product:
         raise HTTPException(status_code=404, detail="Product not found")
 
-    existing = session.exec(
-        select(ProductLike).where(
-            ProductLike.user_id == current_user.id,
-            ProductLike.product_id == product_id,
-        )
-    ).first()
+    existing = _active_alert(session, current_user.id, product_id)
     if existing:
-        return existing
+        return ProductLikeResponse(
+            id=existing.id,
+            product_id=existing.product_id,
+            created_at=existing.created_at,
+        )
 
-    like = ProductLike(user_id=current_user.id, product_id=product_id)
-    session.add(like)
+    alert = Alert(
+        user_id=current_user.id,
+        product_id=product_id,
+        target_price=None,
+    )
+    session.add(alert)
     session.commit()
-    session.refresh(like)
-    return like
+    session.refresh(alert)
+    return ProductLikeResponse(
+        id=alert.id,
+        product_id=alert.product_id,
+        created_at=alert.created_at,
+    )
 
 
 @router.delete("/{product_id}", status_code=status.HTTP_204_NO_CONTENT)
 def unlike_product(product_id: int, current_user: CurrentUser, session: SessionDep):
-    like = session.exec(
-        select(ProductLike).where(
-            ProductLike.user_id == current_user.id,
-            ProductLike.product_id == product_id,
-        )
-    ).first()
-
-    if like:
-        session.delete(like)
-
     alerts = session.exec(
         select(Alert).where(
             Alert.user_id == current_user.id,
@@ -203,5 +226,4 @@ def unlike_product(product_id: int, current_user: CurrentUser, session: SessionD
     for alert in alerts:
         alert.is_active = False
         session.add(alert)
-
     session.commit()
