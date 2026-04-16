@@ -22,6 +22,11 @@ class AlertCreate(BaseModel):
     currency: str = "PLN"
 
 
+class AlertTargetPriceUpdate(BaseModel):
+    target_price: Decimal | None = None
+    currency: str = "PLN"
+
+
 class AlertResponse(BaseModel):
     id: int
     product_id: int
@@ -70,6 +75,47 @@ def create_alert(data: AlertCreate, current_user: CurrentUser, session: SessionD
         target_price=data.target_price,
         currency=data.currency,
     )
+    session.add(alert)
+    session.commit()
+    session.refresh(alert)
+    return alert
+
+
+@router.patch("/by-product/{product_id}", response_model=AlertResponse)
+def upsert_target_price_by_product(
+    product_id: int,
+    data: AlertTargetPriceUpdate,
+    current_user: CurrentUser,
+    session: SessionDep,
+):
+    product = session.get(Product, product_id)
+    if not product:
+        raise HTTPException(status_code=404, detail="Product not found")
+
+    if data.target_price is not None and data.target_price < 0:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="target_price must be non-negative",
+        )
+
+    alert = session.exec(
+        select(Alert).where(
+            Alert.user_id == current_user.id,
+            Alert.product_id == product_id,
+            Alert.is_active == True,  # noqa: E712
+        )
+    ).first()
+
+    if alert:
+        alert.target_price = data.target_price
+        alert.currency = data.currency
+    else:
+        alert = Alert(
+            user_id=current_user.id,
+            product_id=product_id,
+            target_price=data.target_price,
+            currency=data.currency,
+        )
     session.add(alert)
     session.commit()
     session.refresh(alert)

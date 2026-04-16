@@ -2,7 +2,7 @@
 
 import Image from "next/image";
 import Link from "next/link";
-import { Flame, Heart, ImageOff } from "lucide-react";
+import { BellRing, Flame, Heart, ImageOff } from "lucide-react";
 import { useRouter } from "next/navigation";
 import { useState } from "react";
 import { remoteImageOptions } from "../lib/remoteImage";
@@ -13,18 +13,27 @@ import { useAuth } from "../lib/auth";
 interface ProductCardProps {
   product: ProductWithBestPrice;
   featured?: boolean;
+  hideTargetBadge?: boolean;
 }
 
 export default function ProductCard({
   product,
   featured = false,
+  hideTargetBadge = false,
 }: ProductCardProps) {
   const hasActiveOffer = product.best_price != null;
   const router = useRouter();
-  const { user, isLiked, toggleLike } = useAuth();
+  const { user, isLiked, toggleLike, getAlert } = useAuth();
   const [likePending, setLikePending] = useState(false);
   const [likeError, setLikeError] = useState<string | null>(null);
   const favorited = isLiked(product.id);
+  const alert = getAlert(product.id);
+  const targetPrice = alert?.target_price ?? null;
+  const targetCurrency = alert?.currency ?? product.best_price_currency ?? "PLN";
+  const targetReached =
+    targetPrice != null &&
+    product.best_price != null &&
+    product.best_price <= targetPrice;
 
   const storeLogos = [
     product.best_store_logo_url
@@ -143,6 +152,21 @@ export default function ProductCard({
           <p className="text-xs font-semibold text-text-muted">
             Brak aktywnej oferty
           </p>
+        )}
+
+        {targetPrice != null && !hideTargetBadge && (
+          <div
+            className={`flex items-center gap-1.5 text-[0.7rem] font-semibold ${
+              targetReached ? "text-accent-green" : "text-text-muted"
+            }`}
+            title={targetReached ? "Cena osiągnęła Twój cel" : "Twoja cena docelowa"}
+          >
+            <BellRing className="h-3 w-3" />
+            <span>
+              {targetReached ? "Cel osiągnięty: " : "Cel: "}
+              {formatPrice(targetPrice, targetCurrency)}
+            </span>
+          </div>
         )}
 
         {storeLogos.length > 0 && (

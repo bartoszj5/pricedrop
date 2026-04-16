@@ -17,6 +17,7 @@ import { formatDate, formatPrice, humanizeCategory, timeAgo } from "../../lib/ut
 import { isActiveOffer } from "../../lib/normalize";
 import PriceHistoryChartClient from "../../components/PriceHistoryChartClient";
 import EmptyState from "../../components/EmptyState";
+import TargetPriceForm from "../../components/TargetPriceForm";
 import type { Metadata } from "next";
 
 interface PageProps {
@@ -175,6 +176,12 @@ export default async function ProductDetailPage({ params }: PageProps) {
               </span>
             </div>
           )}
+
+          <TargetPriceForm
+            productId={product.id}
+            currentBestPrice={cheapest?.current_price ?? null}
+            currency={cheapest?.currency ?? "PLN"}
+          />
         </div>
       </section>
 

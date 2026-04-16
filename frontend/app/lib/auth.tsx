@@ -20,6 +20,36 @@ export interface AuthUser {
   is_active: boolean;
 }
 
+export interface AlertInfo {
+  id: number;
+  product_id: number;
+  target_price: number | null;
+  currency: string;
+  is_active: boolean;
+  triggered_at: string | null;
+  created_at: string;
+}
+
+interface RawAlertResponse {
+  id: number;
+  product_id: number;
+  target_price: string | number | null;
+  currency: string;
+  is_active: boolean;
+  triggered_at: string | null;
+  created_at: string;
+}
+
+function parseAlert(raw: RawAlertResponse): AlertInfo {
+  return {
+    ...raw,
+    target_price:
+      raw.target_price == null || raw.target_price === ""
+        ? null
+        : Number(raw.target_price),
+  };
+}
+
 interface AuthContextValue {
   user: AuthUser | null;
   loading: boolean;
@@ -35,6 +65,9 @@ interface AuthContextValue {
   unlikeProduct: (productId: number) => Promise<void>;
   toggleLike: (productId: number) => Promise<void>;
   refreshLikes: () => Promise<number[]>;
+  getAlert: (productId: number) => AlertInfo | undefined;
+  setTargetPrice: (productId: number, targetPrice: number | null) => Promise<AlertInfo>;
+  refreshAlerts: () => Promise<AlertInfo[]>;
   logout: () => void;
 }
 
@@ -139,6 +172,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const [user, setUser] = useState<AuthUser | null>(null);
   const [loading, setLoading] = useState(true);
   const [likedProductIds, setLikedProductIds] = useState<number[]>([]);
+  const [alertsByProduct, setAlertsByProduct] = useState<Record<number, AlertInfo>>({});
 
   useEffect(() => {
     let cancelled = false;
@@ -188,12 +222,33 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     }
   }, [user]);
 
+  const refreshAlerts = useCallback(async () => {
+    if (!user) {
+      setAlertsByProduct({});
+      return [];
+    }
+    try {
+      const raw = await apiFetch<RawAlertResponse[]>("/alerts/?is_active=true");
+      const parsed = raw.map(parseAlert);
+      const map: Record<number, AlertInfo> = {};
+      for (const alert of parsed) {
+        map[alert.product_id] = alert;
+      }
+      setAlertsByProduct(map);
+      return parsed;
+    } catch {
+      setAlertsByProduct({});
+      return [];
+    }
+  }, [user]);
+
   useEffect(() => {
     if (!user) return;
     queueMicrotask(() => {
       void refreshLikes();
+      void refreshAlerts();
     });
-  }, [user, refreshLikes]);
+  }, [user, refreshLikes, refreshAlerts]);
 
   const likeProduct = useCallback(async (productId: number) => {
     await apiFetch(`/likes/${productId}`, { method: "POST" });
@@ -203,7 +258,36 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const unlikeProduct = useCallback(async (productId: number) => {
     await apiFetch(`/likes/${productId}`, { method: "DELETE" });
     setLikedProductIds((prev) => prev.filter((id) => id !== productId));
+    setAlertsByProduct((prev) => {
+      if (!(productId in prev)) return prev;
+      const next = { ...prev };
+      delete next[productId];
+      return next;
+    });
   }, []);
+
+  const getAlert = useCallback(
+    (productId: number) => alertsByProduct[productId],
+    [alertsByProduct],
+  );
+
+  const setTargetPrice = useCallback(
+    async (productId: number, targetPrice: number | null) => {
+      const raw = await apiFetch<RawAlertResponse>(
+        `/alerts/by-product/${productId}`,
+        {
+          method: "PATCH",
+          body: JSON.stringify({ target_price: targetPrice, currency: "PLN" }),
+          headers: { "Content-Type": "application/json" },
+        },
+      );
+      const alert = parseAlert(raw);
+      setAlertsByProduct((prev) => ({ ...prev, [productId]: alert }));
+      setLikedProductIds((prev) => (prev.includes(productId) ? prev : [...prev, productId]));
+      return alert;
+    },
+    [],
+  );
 
   const isLiked = useCallback(
     (productId: number) => likedProductIds.includes(productId),
@@ -242,6 +326,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     await apiFetch("/auth/logout", { method: "POST" }).catch(() => {});
     setUser(null);
     setLikedProductIds([]);
+    setAlertsByProduct({});
   }, []);
 
   const value = useMemo(
@@ -257,6 +342,9 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       unlikeProduct,
       toggleLike,
       refreshLikes,
+      getAlert,
+      setTargetPrice,
+      refreshAlerts,
       logout,
     }),
     [
@@ -271,6 +359,9 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       unlikeProduct,
       toggleLike,
       refreshLikes,
+      getAlert,
+      setTargetPrice,
+      refreshAlerts,
       logout,
     ],
   );
