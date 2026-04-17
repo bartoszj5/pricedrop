@@ -126,15 +126,32 @@ def test_with_prices_writes_cache_on_first_hit_and_reuses_on_second(
 def test_invalidate_products_cache_clears_all_product_keys(
     client: TestClient,
     fake_redis: FakeRedis,
+    monkeypatch: pytest.MonkeyPatch,
 ):
+    monkeypatch.setenv("INTERNAL_API_TOKEN", "secret")
+
     client.get("/products/with-prices?category=game")
     client.get("/products/with-prices?category=electronics")
     assert len(fake_redis.store) == 2
 
-    response = client.post("/internal/cache/invalidate-products")
+    response = client.post(
+        "/internal/cache/invalidate-products",
+        headers={"X-Internal-Token": "secret"},
+    )
     assert response.status_code == 200
     assert response.json() == {"status": "ok", "deleted": 2}
     assert fake_redis.store == {}
+
+
+def test_invalidate_returns_503_when_token_unset(
+    client: TestClient,
+    fake_redis: FakeRedis,
+    monkeypatch: pytest.MonkeyPatch,
+):
+    monkeypatch.delenv("INTERNAL_API_TOKEN", raising=False)
+
+    response = client.post("/internal/cache/invalidate-products")
+    assert response.status_code == 503
 
 
 def test_invalidate_requires_token_when_configured(

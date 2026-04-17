@@ -1,3 +1,4 @@
+import hmac
 import logging
 import os
 
@@ -9,12 +10,20 @@ logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/internal", tags=["internal"])
 
+if not os.getenv("INTERNAL_API_TOKEN"):
+    logger.warning(
+        "INTERNAL_API_TOKEN is not set; /internal endpoints will reject all requests"
+    )
+
 
 def _require_internal_token(token: str | None) -> None:
     expected = os.getenv("INTERNAL_API_TOKEN")
     if not expected:
-        return
-    if token != expected:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="internal api disabled",
+        )
+    if not token or not hmac.compare_digest(token, expected):
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="invalid internal token",
