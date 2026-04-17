@@ -229,6 +229,7 @@ func (app *App) handleScrapeStore(w http.ResponseWriter, r *http.Request) {
 		defer app.scrapeGuard.finish()
 		result := app.scrapeStore(storeSlug)
 		log.Printf("Scrape %s completed: %+v", storeSlug, result)
+		app.InvalidateAPICache()
 	}()
 
 	writeJSON(w, http.StatusAccepted, map[string]string{
@@ -258,6 +259,7 @@ func (app *App) scrapeAllStores() []ScrapeStoreResult {
 func (app *App) runScrapeAllStoresJob() {
 	results := app.scrapeAllStores()
 	log.Printf("Scrape all completed: %+v", results)
+	app.InvalidateAPICache()
 }
 
 func (app *App) scrapeStore(storeSlug string) ScrapeStoreResult {
@@ -402,6 +404,7 @@ func (app *App) runCrawlAllStoresJob(maxPages int) {
 		allResults = append(allResults, results...)
 	}
 	log.Printf("Crawl all completed: %d category results", len(allResults))
+	app.InvalidateAPICache()
 }
 
 // handleCrawl triggers crawling for all registered stores.
@@ -488,6 +491,7 @@ func (app *App) handleCrawlStore(w http.ResponseWriter, r *http.Request) {
 		}
 
 		log.Printf("Crawl %s completed: %+v", storeSlug, results)
+		app.InvalidateAPICache()
 	}()
 
 	writeJSON(w, http.StatusAccepted, map[string]string{
