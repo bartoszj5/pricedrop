@@ -21,12 +21,14 @@ def get_client() -> redis.Redis | None:
         return _client
     _client_initialised = True
     try:
-        _client = redis.Redis.from_url(
-            REDIS_URL,
-            decode_responses=True,
-            socket_timeout=1.0,
-            socket_connect_timeout=1.0,
-        )
+        _kw: dict[str, Any] = {
+            "decode_responses": True,
+            "socket_timeout": 1.0,
+            "socket_connect_timeout": 1.0,
+        }
+        if os.getenv("REDIS_PASSWORD"):
+            _kw["password"] = os.environ["REDIS_PASSWORD"]
+        _client = redis.Redis.from_url(REDIS_URL, **_kw)
     except Exception as exc:
         logger.warning("redis cache init failed: %s", exc)
         _client = None
