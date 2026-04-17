@@ -23,6 +23,11 @@ type Config struct {
 	// AmazonSearchDelay is the pause before each /s?k= search GET (link-amazon).
 	AmazonSearchDelay time.Duration
 	UserAgent         string
+	// APIInternalURL points at the PriceDrop API and is used for cache invalidation
+	// after scrape/crawl runs. Empty disables invalidation calls.
+	APIInternalURL string
+	// APIInternalToken, if set, is sent as the X-Internal-Token header.
+	APIInternalToken string
 }
 
 func LoadConfig() Config {
@@ -37,6 +42,8 @@ func LoadConfig() Config {
 		MoreleSearchDelay:  time.Duration(getEnvInt("MORELE_SEARCH_DELAY_MS", 0)) * time.Millisecond,
 		AmazonSearchDelay:  time.Duration(getEnvInt("AMAZON_SEARCH_DELAY_MS", 0)) * time.Millisecond,
 		UserAgent:          getEnv("USER_AGENT", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36"),
+		APIInternalURL:     getEnv("API_INTERNAL_URL", "http://api:8000"),
+		APIInternalToken:   getEnv("INTERNAL_API_TOKEN", ""),
 	}
 }
 

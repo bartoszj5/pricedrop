@@ -8,6 +8,7 @@ from pydantic import ConfigDict
 from sqlalchemy import case, func, or_
 from sqlmodel import SQLModel, Session, delete, select
 
+import cache
 from shared.database import get_session
 from shared.models import Alert, Price, PriceHistory, Product, Store
 
@@ -274,6 +275,18 @@ def list_products_with_prices(
     page: Annotated[int, Query(ge=1)] = 1,
     page_size: Annotated[int, Query(ge=1, le=100)] = 20,
 ) -> ProductWithPricesListResponse:
+    cache_key = cache.build_products_key(
+        search=search,
+        category=category,
+        store=store,
+        sort=sort,
+        page=page,
+        page_size=page_size,
+    )
+    cached = cache.get_json(cache_key)
+    if cached is not None:
+        return ProductWithPricesListResponse.model_validate(cached)
+
     available_condition = (Price.is_available == True) & Price.current_price.is_not(None)
 
     ranked_best_prices = (
@@ -448,7 +461,7 @@ def list_products_with_prices(
             )
         )
 
-    return ProductWithPricesListResponse(
+    response = ProductWithPricesListResponse(
         items=items,
         categories=categories,
         total=total,
@@ -456,6 +469,8 @@ def list_products_with_prices(
         page_size=page_size,
         total_pages=ceil(total / page_size) if total else 0,
     )
+    cache.set_json(cache_key, response.model_dump(mode="json"))
+    return response
 
 
 @router.get("/products/{slug}", response_model=ProductDetailResponse)
