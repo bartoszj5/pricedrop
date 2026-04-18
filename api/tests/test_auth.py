@@ -1,4 +1,3 @@
-from decimal import Decimal
 from pathlib import Path
 import sys
 
@@ -16,9 +15,51 @@ from main import app  # noqa: E402
 from shared.database import get_session  # noqa: E402
 from shared.models import Product  # noqa: E402
 
+STRONG_PASSWORD = "Zq7-mLp9#XvT2kRn4"
+
+
+class CSRFTestClient(TestClient):
+    """TestClient that auto-injects X-CSRF-Token from the cookie jar, like the frontend."""
+
+    def request(self, method: str, url, **kwargs):
+        if method.upper() not in {"GET", "HEAD", "OPTIONS"}:
+            csrf = self.cookies.get("csrf_token")
+            if csrf:
+                headers = dict(kwargs.get("headers") or {})
+                headers.setdefault("X-CSRF-Token", csrf)
+                kwargs["headers"] = headers
+        return super().request(method, url, **kwargs)
+
 
 @pytest.fixture()
 def client():
+    engine = create_engine(
+        "sqlite://",
+        connect_args={"check_same_thread": False},
+        poolclass=StaticPool,
+    )
+    SQLModel.metadata.create_all(engine)
+
+    def override_get_session():
+        with Session(engine) as session:
+            yield session
+
+    app.dependency_overrides[get_session] = override_get_session
+
+    with Session(engine) as session:
+        product = Product(title="Test Product", slug="test-product", category="game")
+        session.add(product)
+        session.commit()
+
+    with CSRFTestClient(app) as test_client:
+        yield test_client
+
+    app.dependency_overrides.clear()
+
+
+@pytest.fixture()
+def raw_client():
+    """Plain TestClient without auto CSRF injection, for testing the middleware itself."""
     engine = create_engine(
         "sqlite://",
         connect_args={"check_same_thread": False},
@@ -43,7 +84,7 @@ def client():
     app.dependency_overrides.clear()
 
 
-def _register(client: TestClient, username="testuser", email="test@example.com", password="Secret123!"):
+def _register(client: TestClient, username="testuser", email="test@example.com", password=STRONG_PASSWORD):
     return client.post("/auth/register", json={
         "username": username,
         "email": email,
@@ -51,7 +92,7 @@ def _register(client: TestClient, username="testuser", email="test@example.com",
     })
 
 
-def _login(client: TestClient, username="testuser", password="Secret123!"):
+def _login(client: TestClient, username="testuser", password=STRONG_PASSWORD):
     return client.post("/auth/login", data={
         "username": username,
         "password": password,
@@ -79,6 +120,11 @@ def test_register_success(client: TestClient):
     assert body["username"] == "testuser"
     assert body["email"] == "test@example.com"
     assert "hashed_password" not in body
+
+
+def test_register_rejects_short_password(client: TestClient):
+    resp = _register(client, password="Ab1!")
+    assert resp.status_code == 422
 
 
 def test_register_duplicate_username(client: TestClient):
@@ -111,6 +157,17 @@ def test_login_sets_httponly_cookie(client: TestClient):
     _register(client)
     resp = _login(client)
     assert "access_token" in resp.cookies
+
+
+def test_login_sets_csrf_cookie(client: TestClient):
+    _register(client)
+    resp = _login(client)
+    assert "csrf_token" in resp.cookies
+    # CSRF cookie must be readable by JS (not HttpOnly) so the client can echo it in a header.
+    set_cookie_headers = resp.headers.get_list("set-cookie")
+    csrf_header = next((h for h in set_cookie_headers if h.startswith("csrf_token=")), None)
+    assert csrf_header is not None
+    assert "httponly" not in csrf_header.lower()
 
 
 def test_me_via_cookie(client: TestClient):
@@ -217,6 +274,22 @@ def test_refresh_issues_new_access_token(client: TestClient):
     assert resp.json()["token_type"] == "bearer"
 
 
+def test_refresh_rotates_token(client: TestClient):
+    """Old refresh token must be rejected after rotation."""
+    _register(client)
+    login_resp = _login(client)
+    old_refresh = login_resp.cookies["refresh_token"]
+
+    # First refresh: succeeds, rotates the token.
+    first = client.post("/auth/refresh", cookies={"refresh_token": old_refresh})
+    assert first.status_code == 200
+
+    # Second refresh with the *old* cookie: must be rejected.
+    client.cookies.clear()
+    replay = client.post("/auth/refresh", cookies={"refresh_token": old_refresh})
+    assert replay.status_code == 401
+
+
 def test_refresh_without_cookie_returns_401(client: TestClient):
     resp = client.post("/auth/refresh")
     assert resp.status_code == 401
@@ -243,6 +316,33 @@ def test_logout_clears_cookie(client: TestClient):
     set_cookie_header = resp.headers.get("set-cookie", "")
     assert "access_token" in set_cookie_header
     assert "refresh_token" in set_cookie_header
+
+
+# --- CSRF middleware ---
+
+
+def test_csrf_blocks_unsafe_request_without_header(raw_client: TestClient):
+    _register(raw_client)
+    _login(raw_client)
+    # raw_client does NOT auto-inject X-CSRF-Token. After login, auth cookies are set.
+    resp = raw_client.post("/auth/logout")
+    assert resp.status_code == 403
+    assert "CSRF" in resp.json()["detail"]
+
+
+def test_csrf_allows_safe_request_without_header(raw_client: TestClient):
+    _register(raw_client)
+    _login(raw_client)
+    resp = raw_client.get("/auth/me")
+    assert resp.status_code == 200
+
+
+def test_csrf_allows_unauth_post_without_header(raw_client: TestClient):
+    """Exempt paths (login/register/refresh) work without CSRF header."""
+    # Plain POST without prior cookies — should reach the handler (validation error here).
+    resp = raw_client.post("/auth/login", data={"username": "x", "password": STRONG_PASSWORD})
+    # No user exists yet; expect 401 from handler, not 403 from middleware.
+    assert resp.status_code == 401
 
 
 # --- Alerts (protected) ---

@@ -2,6 +2,7 @@ from datetime import timedelta
 from typing import Annotated
 from urllib.parse import urlparse
 
+import jwt
 from fastapi import APIRouter, Depends, HTTPException, Request, Response, status
 from fastapi.security import OAuth2PasswordRequestForm
 import re
@@ -9,19 +10,24 @@ import re
 from pydantic import BaseModel, EmailStr, Field, field_validator
 from sqlmodel import Session, select
 
+from csrf import CSRF_COOKIE_NAME, generate_csrf_token
 from dependencies.auth import (
     ACCESS_TOKEN_EXPIRE_MINUTES,
+    ALGORITHM,
     AUTH_COOKIE_NAME,
     COOKIE_SECURE,
     REFRESH_COOKIE_NAME,
     REFRESH_TOKEN_EXPIRE_DAYS,
+    SECRET_KEY,
     authenticate_user,
     create_access_token,
     create_refresh_token,
     decode_refresh_token,
     get_current_active_user,
     get_password_hash,
+    revoke_refresh_token,
 )
+from rate_limit import LOGIN_LIMIT, REFRESH_LIMIT, REGISTER_LIMIT, limiter
 from shared.database import get_session
 from shared.models import User
 
@@ -29,6 +35,8 @@ router = APIRouter(prefix="/auth", tags=["auth"])
 
 SessionDep = Annotated[Session, Depends(get_session)]
 CurrentUser = Annotated[User, Depends(get_current_active_user)]
+
+MIN_PASSWORD_LENGTH = 8
 
 
 class Token(BaseModel):
@@ -52,9 +60,13 @@ class UserRegister(BaseModel):
 
     @field_validator("password")
     @classmethod
-    def password_min_length(cls, v: str) -> str:
-        if len(v) < 8:
-            raise ValueError("Password must be at least 8 characters")
+    def password_length(cls, v: str) -> str:
+        if len(v) < MIN_PASSWORD_LENGTH:
+            raise ValueError(
+                f"Password must be at least {MIN_PASSWORD_LENGTH} characters"
+            )
+        if len(v) > 256:
+            raise ValueError("Password is too long")
         return v
 
 
@@ -110,7 +122,8 @@ class UserSettingsUpdate(BaseModel):
 
 
 @router.post("/register", response_model=UserResponse, status_code=status.HTTP_201_CREATED)
-def register(data: UserRegister, session: SessionDep):
+@limiter.limit(REGISTER_LIMIT)
+def register(request: Request, data: UserRegister, session: SessionDep, response: Response):
     existing = session.exec(
         select(User).where((User.username == data.username) | (User.email == data.email))
     ).first()
@@ -132,12 +145,24 @@ def register(data: UserRegister, session: SessionDep):
     return user
 
 
+def _set_csrf_cookie(response: Response) -> None:
+    response.set_cookie(
+        key=CSRF_COOKIE_NAME,
+        value=generate_csrf_token(),
+        httponly=False,
+        secure=COOKIE_SECURE,
+        samesite="lax",
+        max_age=REFRESH_TOKEN_EXPIRE_DAYS * 24 * 60 * 60,
+        path="/",
+    )
+
+
 def _set_auth_cookies(response: Response, username: str) -> str:
     access_token = create_access_token(
         data={"sub": username},
         expires_delta=timedelta(minutes=ACCESS_TOKEN_EXPIRE_MINUTES),
     )
-    refresh_token = create_refresh_token(data={"sub": username})
+    refresh_token, _jti = create_refresh_token(data={"sub": username})
     response.set_cookie(
         key=AUTH_COOKIE_NAME,
         value=access_token,
@@ -156,11 +181,14 @@ def _set_auth_cookies(response: Response, username: str) -> str:
         max_age=REFRESH_TOKEN_EXPIRE_DAYS * 24 * 60 * 60,
         path="/",
     )
+    _set_csrf_cookie(response)
     return access_token
 
 
 @router.post("/login", response_model=Token)
+@limiter.limit(LOGIN_LIMIT)
 def login(
+    request: Request,
     form_data: Annotated[OAuth2PasswordRequestForm, Depends()],
     session: SessionDep,
     response: Response,
@@ -177,6 +205,7 @@ def login(
 
 
 @router.post("/refresh", response_model=Token)
+@limiter.limit(REFRESH_LIMIT)
 def refresh(request: Request, session: SessionDep, response: Response):
     token = request.cookies.get(REFRESH_COOKIE_NAME)
     if not token:
@@ -184,26 +213,43 @@ def refresh(request: Request, session: SessionDep, response: Response):
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="No refresh token",
         )
-    username = decode_refresh_token(token)
-    if not username:
+    payload = decode_refresh_token(token)
+    if not payload:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Invalid refresh token",
         )
+    username = payload.get("sub")
     user = session.exec(select(User).where(User.username == username)).first()
     if not user or not user.is_active:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="User not found or inactive",
         )
+    old_jti = payload.get("jti")
+    if old_jti:
+        revoke_refresh_token(old_jti, payload.get("exp"))
     access_token = _set_auth_cookies(response, user.username)
     return Token(access_token=access_token, token_type="bearer")
 
 
 @router.post("/logout")
-def logout(response: Response):
+def logout(request: Request, response: Response):
+    refresh_cookie = request.cookies.get(REFRESH_COOKIE_NAME)
+    if refresh_cookie:
+        try:
+            payload = jwt.decode(
+                refresh_cookie, SECRET_KEY, algorithms=[ALGORITHM],
+                options={"verify_exp": False},
+            )
+            jti = payload.get("jti")
+            if jti and payload.get("type") == "refresh":
+                revoke_refresh_token(jti, payload.get("exp"))
+        except jwt.InvalidTokenError:
+            pass
     response.delete_cookie(key=AUTH_COOKIE_NAME, path="/")
     response.delete_cookie(key=REFRESH_COOKIE_NAME, path="/")
+    response.delete_cookie(key=CSRF_COOKIE_NAME, path="/")
     return {"detail": "Logged out"}
 
 

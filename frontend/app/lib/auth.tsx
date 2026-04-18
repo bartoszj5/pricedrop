@@ -107,6 +107,43 @@ function resolveApiBase(): string {
 
 const API_BASE = resolveApiBase();
 
+const SAFE_METHODS = new Set(["GET", "HEAD", "OPTIONS"]);
+
+function getCsrfToken(): string | null {
+  if (typeof document === "undefined") return null;
+  const match = document.cookie.match(/(?:^|;\s*)csrf_token=([^;]+)/);
+  return match ? decodeURIComponent(match[1]) : null;
+}
+
+function withCsrfHeader(options: RequestInit): RequestInit {
+  const method = (options.method ?? "GET").toUpperCase();
+  if (SAFE_METHODS.has(method)) return options;
+  const token = getCsrfToken();
+  if (!token) return options;
+  const headers = new Headers(options.headers ?? undefined);
+  if (!headers.has("X-CSRF-Token")) {
+    headers.set("X-CSRF-Token", token);
+  }
+  return { ...options, headers };
+}
+
+function formatApiError(body: unknown): string | null {
+  if (!body || typeof body !== "object") return null;
+  const detail = (body as { detail?: unknown }).detail;
+  if (typeof detail === "string") return detail;
+  if (Array.isArray(detail)) {
+    const messages = detail
+      .map((entry) =>
+        entry && typeof entry === "object" && "msg" in entry
+          ? String((entry as { msg: unknown }).msg)
+          : null,
+      )
+      .filter((msg): msg is string => Boolean(msg));
+    if (messages.length) return messages.join("; ");
+  }
+  return null;
+}
+
 let refreshPromise: Promise<boolean> | null = null;
 
 async function parseJsonOrEmpty<T>(response: Response): Promise<T> {
@@ -136,9 +173,10 @@ export async function apiFetch<T>(
   path: string,
   options: RequestInit = {},
 ): Promise<T> {
+  const prepared = withCsrfHeader(options);
   const res = await fetch(`${API_BASE}${path}`, {
     credentials: "include",
-    ...options,
+    ...prepared,
   });
   if (res.status === 401 && path !== "/auth/refresh" && path !== "/auth/login") {
     if (!refreshPromise) {
@@ -148,14 +186,14 @@ export async function apiFetch<T>(
     if (refreshed) {
       const retry = await fetch(`${API_BASE}${path}`, {
         credentials: "include",
-        ...options,
+        ...withCsrfHeader(options),
       });
       if (retry.ok) return parseJsonOrEmpty<T>(retry);
     }
   }
   if (!res.ok) {
     const body = await res.json().catch(() => null);
-    throw new Error(body?.detail ?? `Request failed (${res.status})`);
+    throw new Error(formatApiError(body) ?? `Request failed (${res.status})`);
   }
   return parseJsonOrEmpty<T>(res);
 }
