@@ -9,6 +9,7 @@ from sqlalchemy import case, func, or_
 from sqlmodel import SQLModel, Session, delete, select
 
 import cache
+from dependencies.auth import require_internal_token
 from shared.database import get_session
 from shared.models import Alert, Price, PriceHistory, Product, Store
 
@@ -563,6 +564,7 @@ def get_product_price_history(
     "/products",
     response_model=ProductRead,
     status_code=status.HTTP_201_CREATED,
+    dependencies=[Depends(require_internal_token)],
 )
 def create_product(payload: ProductCreate, session: SessionDep) -> ProductRead:
     _ensure_unique_product_slug(session, payload.slug)
@@ -575,7 +577,11 @@ def create_product(payload: ProductCreate, session: SessionDep) -> ProductRead:
     return ProductRead.model_validate(product)
 
 
-@router.patch("/products/{slug}", response_model=ProductRead)
+@router.patch(
+    "/products/{slug}",
+    response_model=ProductRead,
+    dependencies=[Depends(require_internal_token)],
+)
 def update_product(
     slug: str,
     payload: ProductUpdate,
@@ -604,7 +610,11 @@ def update_product(
     return ProductRead.model_validate(product)
 
 
-@router.delete("/products/{slug}", status_code=status.HTTP_204_NO_CONTENT)
+@router.delete(
+    "/products/{slug}",
+    status_code=status.HTTP_204_NO_CONTENT,
+    dependencies=[Depends(require_internal_token)],
+)
 def delete_product(slug: str, session: SessionDep) -> Response:
     product = _get_product_by_slug(session, slug)
     if not product:

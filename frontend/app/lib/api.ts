@@ -57,12 +57,18 @@ async function fetchServer<T>(
   } = options;
   let lastError: Error | undefined;
 
+  const internalToken = process.env.INTERNAL_API_TOKEN;
+  const mergedHeaders = new Headers(headers);
+  if (internalToken && !mergedHeaders.has("X-Internal-Token")) {
+    mergedHeaders.set("X-Internal-Token", internalToken);
+  }
+
   for (const base of API_BASES) {
     try {
       const res = await fetch(`${base}${path}`, {
         method,
         body,
-        headers,
+        headers: mergedHeaders,
         ...(fresh ? { cache: "no-store" } : { next: { revalidate } }),
       });
       if (!res.ok) {

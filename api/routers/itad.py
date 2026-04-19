@@ -11,6 +11,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy import func
 from sqlmodel import SQLModel, Session, select
 
+from dependencies.auth import require_internal_token
 from shared.database import get_session
 from shared.models import Price, PriceHistory, Product, Store
 
@@ -908,7 +909,11 @@ def search_itad_games(
     return items
 
 
-@router.post("/itad/sync", response_model=ITADSyncResponse)
+@router.post(
+    "/itad/sync",
+    response_model=ITADSyncResponse,
+    dependencies=[Depends(require_internal_token)],
+)
 def sync_itad_games(
     session: Annotated[Session, Depends(get_session)],
     limit: Annotated[int, Query(ge=1, le=200)] = 60,
@@ -949,7 +954,11 @@ def sync_itad_games(
     )
 
 
-@router.post("/itad/refresh-prices", response_model=ITADPriceRefreshResponse)
+@router.post(
+    "/itad/refresh-prices",
+    response_model=ITADPriceRefreshResponse,
+    dependencies=[Depends(require_internal_token)],
+)
 def refresh_itad_prices(
     session: Annotated[Session, Depends(get_session)],
     country: Annotated[str, Query(min_length=2, max_length=2)] = "PL",
@@ -974,7 +983,11 @@ def refresh_itad_prices(
     )
 
 
-@router.post("/itad/search-save", response_model=ITADSearchSaveResponse)
+@router.post(
+    "/itad/search-save",
+    response_model=ITADSearchSaveResponse,
+    dependencies=[Depends(require_internal_token)],
+)
 def search_and_save_itad_games(
     session: Annotated[Session, Depends(get_session)],
     title: Annotated[str, Query(min_length=1, max_length=120)],

@@ -1,3 +1,4 @@
+import hmac
 import logging
 import os
 import uuid
@@ -6,7 +7,7 @@ from typing import Annotated
 
 import bcrypt
 import jwt
-from fastapi import Depends, HTTPException, Request, status
+from fastapi import Depends, Header, HTTPException, Request, status
 from fastapi.security import OAuth2PasswordBearer
 from sqlmodel import Session, select
 
@@ -158,3 +159,21 @@ async def get_current_active_user(
     if not current_user.is_active:
         raise HTTPException(status_code=400, detail="Inactive user")
     return current_user
+
+
+def require_internal_token(
+    x_internal_token: Annotated[
+        str | None, Header(alias="X-Internal-Token")
+    ] = None,
+) -> None:
+    expected = os.getenv("INTERNAL_API_TOKEN")
+    if not expected:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="admin api disabled: INTERNAL_API_TOKEN not set",
+        )
+    if not x_internal_token or not hmac.compare_digest(x_internal_token, expected):
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="invalid internal token",
+        )

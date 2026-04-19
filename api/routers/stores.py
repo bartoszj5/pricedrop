@@ -7,6 +7,7 @@ from pydantic import ConfigDict, field_validator
 from sqlalchemy import func, or_
 from sqlmodel import SQLModel, Session, delete, select
 
+from dependencies.auth import require_internal_token
 from shared.database import get_session
 from shared.models import Price, PriceHistory, Store
 
@@ -124,7 +125,12 @@ def get_store(slug: str, session: SessionDep) -> StoreRead:
     return StoreRead.model_validate(store)
 
 
-@router.post("/stores", response_model=StoreRead, status_code=status.HTTP_201_CREATED)
+@router.post(
+    "/stores",
+    response_model=StoreRead,
+    status_code=status.HTTP_201_CREATED,
+    dependencies=[Depends(require_internal_token)],
+)
 def create_store(payload: StoreCreate, session: SessionDep) -> StoreRead:
     _ensure_unique_store_slug(session, payload.slug)
 
@@ -135,7 +141,11 @@ def create_store(payload: StoreCreate, session: SessionDep) -> StoreRead:
     return StoreRead.model_validate(store)
 
 
-@router.patch("/stores/{slug}", response_model=StoreRead)
+@router.patch(
+    "/stores/{slug}",
+    response_model=StoreRead,
+    dependencies=[Depends(require_internal_token)],
+)
 def update_store(slug: str, payload: StoreUpdate, session: SessionDep) -> StoreRead:
     store = _get_store_by_slug(session, slug)
     if not store:
@@ -158,7 +168,11 @@ def update_store(slug: str, payload: StoreUpdate, session: SessionDep) -> StoreR
     return StoreRead.model_validate(store)
 
 
-@router.delete("/stores/{slug}", status_code=status.HTTP_204_NO_CONTENT)
+@router.delete(
+    "/stores/{slug}",
+    status_code=status.HTTP_204_NO_CONTENT,
+    dependencies=[Depends(require_internal_token)],
+)
 def delete_store(slug: str, session: SessionDep) -> Response:
     store = _get_store_by_slug(session, slug)
     if not store:
