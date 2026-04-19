@@ -8,6 +8,7 @@ from pydantic import ConfigDict, field_validator
 from sqlalchemy import case, func, or_
 from sqlmodel import SQLModel, Session, delete, select
 
+from dependencies.auth import require_internal_token
 from shared.database import get_session
 from shared.models import Price, PriceHistory, Product, Store
 
@@ -263,7 +264,12 @@ def get_price(price_id: int, session: SessionDep) -> PriceDetailRead:
     )
 
 
-@router.post("/prices", response_model=PriceRead, status_code=status.HTTP_201_CREATED)
+@router.post(
+    "/prices",
+    response_model=PriceRead,
+    status_code=status.HTTP_201_CREATED,
+    dependencies=[Depends(require_internal_token)],
+)
 def create_price(payload: PriceCreate, session: SessionDep) -> PriceRead:
     _ensure_product_exists(session, payload.product_id)
     _ensure_store_exists(session, payload.store_id)
@@ -277,7 +283,11 @@ def create_price(payload: PriceCreate, session: SessionDep) -> PriceRead:
     return PriceRead.model_validate(price)
 
 
-@router.patch("/prices/{price_id}", response_model=PriceRead)
+@router.patch(
+    "/prices/{price_id}",
+    response_model=PriceRead,
+    dependencies=[Depends(require_internal_token)],
+)
 def update_price(price_id: int, payload: PriceUpdate, session: SessionDep) -> PriceRead:
     price = _get_price_by_id(session, price_id)
     if not price:
@@ -323,7 +333,11 @@ def update_price(price_id: int, payload: PriceUpdate, session: SessionDep) -> Pr
     return PriceRead.model_validate(price)
 
 
-@router.delete("/prices/{price_id}", status_code=status.HTTP_204_NO_CONTENT)
+@router.delete(
+    "/prices/{price_id}",
+    status_code=status.HTTP_204_NO_CONTENT,
+    dependencies=[Depends(require_internal_token)],
+)
 def delete_price(price_id: int, session: SessionDep) -> Response:
     price = _get_price_by_id(session, price_id)
     if not price:

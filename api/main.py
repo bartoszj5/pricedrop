@@ -5,8 +5,13 @@ from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from slowapi import _rate_limit_exceeded_handler
+from slowapi.errors import RateLimitExceeded
+from slowapi.middleware import SlowAPIMiddleware
 
+from csrf import CSRFMiddleware
 from itad_scheduler import itad_sync_loop
+from rate_limit import limiter
 from routers import alerts, auth, dedup, internal, itad, likes, prices, products, stores
 
 logging.basicConfig(
@@ -30,6 +35,11 @@ async def lifespan(app: FastAPI):
 
 
 app = FastAPI(title="PriceDrop API", lifespan=lifespan)
+
+app.state.limiter = limiter
+app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
+app.add_middleware(SlowAPIMiddleware)
+app.add_middleware(CSRFMiddleware)
 
 CORS_ORIGINS = [
     origin.strip()

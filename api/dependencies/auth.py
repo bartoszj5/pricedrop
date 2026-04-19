@@ -1,15 +1,21 @@
+import hmac
+import logging
 import os
+import uuid
 from datetime import datetime, timedelta, timezone
 from typing import Annotated
 
 import bcrypt
 import jwt
-from fastapi import Depends, HTTPException, Request, status
+from fastapi import Depends, Header, HTTPException, Request, status
 from fastapi.security import OAuth2PasswordBearer
 from sqlmodel import Session, select
 
+from cache import get_client
 from shared.database import get_session
 from shared.models import User
+
+logger = logging.getLogger(__name__)
 
 _secret = os.getenv("SECRET_KEY")
 if not _secret:
@@ -35,6 +41,8 @@ COOKIE_SECURE = _read_bool_env(
     os.getenv("ENVIRONMENT") == "production",
 )
 
+REVOKED_REFRESH_KEY_PREFIX = "auth:refresh:revoked:"
+
 oauth2_scheme = OAuth2PasswordBearer(tokenUrl="/auth/login", auto_error=False)
 
 
@@ -53,21 +61,54 @@ def create_access_token(data: dict, expires_delta: timedelta | None = None) -> s
     return jwt.encode(to_encode, SECRET_KEY, algorithm=ALGORITHM)
 
 
-def create_refresh_token(data: dict) -> str:
+def create_refresh_token(data: dict) -> tuple[str, str]:
+    """Return (token, jti). jti identifies the token for revocation."""
     to_encode = data.copy()
     expire = datetime.now(timezone.utc) + timedelta(days=REFRESH_TOKEN_EXPIRE_DAYS)
-    to_encode.update({"exp": expire, "type": "refresh"})
-    return jwt.encode(to_encode, SECRET_KEY, algorithm=ALGORITHM)
+    jti = uuid.uuid4().hex
+    to_encode.update({"exp": expire, "type": "refresh", "jti": jti})
+    token = jwt.encode(to_encode, SECRET_KEY, algorithm=ALGORITHM)
+    return token, jti
 
 
-def decode_refresh_token(token: str) -> str | None:
+def decode_refresh_token(token: str) -> dict | None:
+    """Return payload dict if the token is a valid, non-revoked refresh token."""
     try:
         payload = jwt.decode(token, SECRET_KEY, algorithms=[ALGORITHM])
-        if payload.get("type") != "refresh":
-            return None
-        return payload.get("sub")
     except jwt.InvalidTokenError:
         return None
+    if payload.get("type") != "refresh":
+        return None
+    jti = payload.get("jti")
+    if jti and _is_refresh_revoked(jti):
+        return None
+    return payload
+
+
+def _is_refresh_revoked(jti: str) -> bool:
+    client = get_client()
+    if client is None:
+        return False
+    try:
+        return bool(client.exists(f"{REVOKED_REFRESH_KEY_PREFIX}{jti}"))
+    except Exception as exc:
+        logger.warning("redis EXISTS failed for refresh jti: %s", exc)
+        return False
+
+
+def revoke_refresh_token(jti: str, exp: int | None) -> None:
+    """Add refresh jti to blacklist with TTL matching the token's remaining lifetime."""
+    client = get_client()
+    if client is None:
+        return
+    ttl = 1
+    if exp is not None:
+        remaining = int(exp - datetime.now(timezone.utc).timestamp())
+        ttl = max(remaining, 1)
+    try:
+        client.setex(f"{REVOKED_REFRESH_KEY_PREFIX}{jti}", ttl, "1")
+    except Exception as exc:
+        logger.warning("redis SETEX failed for refresh jti: %s", exc)
 
 
 def authenticate_user(session: Session, username: str, password: str) -> User | None:
@@ -118,3 +159,21 @@ async def get_current_active_user(
     if not current_user.is_active:
         raise HTTPException(status_code=400, detail="Inactive user")
     return current_user
+
+
+def require_internal_token(
+    x_internal_token: Annotated[
+        str | None, Header(alias="X-Internal-Token")
+    ] = None,
+) -> None:
+    expected = os.getenv("INTERNAL_API_TOKEN")
+    if not expected:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="admin api disabled: INTERNAL_API_TOKEN not set",
+        )
+    if not x_internal_token or not hmac.compare_digest(x_internal_token, expected):
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="invalid internal token",
+        )

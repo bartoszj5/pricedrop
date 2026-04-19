@@ -6,6 +6,7 @@ from typing import Annotated, Any
 from fastapi import APIRouter, Depends, Query
 from sqlmodel import Session, SQLModel, delete, select
 
+from dependencies.auth import require_internal_token
 from shared.database import get_session
 from shared.models import Alert, Price, PriceHistory, Product
 
@@ -87,7 +88,11 @@ class DeduplicateResponse(SQLModel):
 SessionDep = Annotated[Session, Depends(get_session)]
 
 
-@router.post("/products/deduplicate", response_model=DeduplicateResponse)
+@router.post(
+    "/products/deduplicate",
+    response_model=DeduplicateResponse,
+    dependencies=[Depends(require_internal_token)],
+)
 def deduplicate_products(
     session: SessionDep,
     dry_run: Annotated[
