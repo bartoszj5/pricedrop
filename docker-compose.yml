@@ -93,7 +93,7 @@ services:
   scraper:
     build: ./scraper
     ports:
-      - "8001:8001"
+      - "127.0.0.1:8001:8001"
     environment:
       DATABASE_URL: postgresql://${POSTGRES_USER:-pricedrop}:${POSTGRES_PASSWORD:-pricedrop}@postgres:5432/${POSTGRES_DB:-pricedrop}
       REDIS_URL: redis://redis:6379/1
