@@ -67,22 +67,30 @@ func pickBestMoreleHit(productTitle, manufacturerCode string, hits []MoreleSearc
 			pool = filtered
 		}
 	}
+	if len(pool) == 0 {
+		return MoreleSearchHit{}, 0, false
+	}
+
+	candidates := make([]string, len(pool))
+	for i := range pool {
+		t := strings.TrimSpace(pool[i].Title)
+		if t == "" {
+			t = moreleURLStem(pool[i].URL)
+		}
+		candidates[i] = t
+	}
+	scores := titleSimilarityScores(productTitle, candidates)
 
 	var top *MoreleSearchHit
 	topScore := 0.0
 	for i := range pool {
-		h := &pool[i]
-		candidate := strings.TrimSpace(h.Title)
-		if candidate == "" {
-			candidate = moreleURLStem(h.URL)
-		}
-		s := titleTokenJaccard(productTitle, candidate)
-		if code != "" && hitShowsManufacturerCode(h, code) && s < 0.50 {
+		s := scores[i]
+		if code != "" && hitShowsManufacturerCode(&pool[i], code) && s < 0.50 {
 			s = 0.50
 		}
 		if s > topScore {
 			topScore = s
-			top = h
+			top = &pool[i]
 		}
 	}
 	if top == nil {

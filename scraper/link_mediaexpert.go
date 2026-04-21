@@ -127,19 +127,26 @@ func pickBestMediaExpertHit(productTitle, manufacturerCode string, hits []mediaE
 			pool = filtered
 		}
 	}
+	if len(pool) == 0 {
+		return mediaExpertSearchItem{}, 0, false
+	}
+
+	candidates := make([]string, len(pool))
+	for i := range pool {
+		candidates[i] = mediaExpertHitCandidateTitle(&pool[i])
+	}
+	scores := titleSimilarityScores(productTitle, candidates)
 
 	var top *mediaExpertSearchItem
 	topScore := 0.0
 	for i := range pool {
-		h := &pool[i]
-		candidate := mediaExpertHitCandidateTitle(h)
-		s := titleTokenJaccard(productTitle, candidate)
-		if code != "" && hitShowsManufacturerCodeMediaExpert(h, code) && s < 0.50 {
+		s := scores[i]
+		if code != "" && hitShowsManufacturerCodeMediaExpert(&pool[i], code) && s < 0.50 {
 			s = 0.50
 		}
 		if s > topScore {
 			topScore = s
-			top = h
+			top = &pool[i]
 		}
 	}
 	if top == nil {

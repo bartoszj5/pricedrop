@@ -103,6 +103,8 @@ services:
       CRAWL_INTERVAL: ${CRAWL_INTERVAL:-24h}
       API_INTERNAL_URL: ${API_INTERNAL_URL:-http://api:8000}
       INTERNAL_API_TOKEN: ${INTERNAL_API_TOKEN:-}
+      EMBEDDINGS_URL: ${EMBEDDINGS_URL:-http://embeddings:8003}
+      EMBEDDINGS_TIMEOUT_MS: ${EMBEDDINGS_TIMEOUT_MS:-5000}
     depends_on:
       postgres:
         condition: service_healthy
@@ -114,6 +116,25 @@ services:
       test: ["CMD", "curl", "-f", "http://localhost:8001/health"]
       interval: 10s
       retries: 3
+
+  embeddings:
+    build:
+      context: .
+      dockerfile: embeddings/Dockerfile
+    ports:
+      - "127.0.0.1:8003:8003"
+    environment:
+      EMBEDDINGS_MODEL: ${EMBEDDINGS_MODEL:-sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2}
+      EMBEDDINGS_MAX_CANDIDATES: ${EMBEDDINGS_MAX_CANDIDATES:-100}
+      EMBEDDINGS_MAX_TEXT_LEN: ${EMBEDDINGS_MAX_TEXT_LEN:-512}
+      HF_HOME: /models
+    volumes:
+      - embeddings_models:/models
+    healthcheck:
+      test: ["CMD-SHELL", "python -c 'import urllib.request; urllib.request.urlopen(\"http://localhost:8003/health\")'"]
+      interval: 10s
+      retries: 5
+      start_period: 60s
 
   notifications:
     build:
@@ -168,3 +189,4 @@ volumes:
   pgdata:
   redisdata:
   rabbitmqdata:
+  embeddings_models:

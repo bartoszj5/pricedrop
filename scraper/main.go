@@ -106,6 +106,13 @@ func main() {
 		defer pub.Close()
 	}
 
+	embeddingsClient = NewEmbeddingsClient(cfg.EmbeddingsURL, cfg.EmbeddingsTimeout)
+	if embeddingsClient != nil {
+		log.Printf("Embeddings service configured: %s (timeout=%s)", cfg.EmbeddingsURL, cfg.EmbeddingsTimeout)
+	} else {
+		log.Printf("Embeddings service disabled — linker falls back to Jaccard title matching")
+	}
+
 	app := &App{
 		config:          cfg,
 		db:              db,
