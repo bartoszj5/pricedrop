@@ -195,10 +195,12 @@ func (db *DB) PriceExistsByURL(url string) (bool, error) {
 // creates a price record linking it to the given store. If the price record
 // already exists (product_id, store_id unique constraint), it is skipped.
 // manufacturerCode: when non-empty, set on insert or overwrite on conflict when provided.
-func (db *DB) UpsertProductAndPrice(title, productSlug, category, imageURL string, storeID int, price float64, currency, url, manufacturerCode string) error {
+// Returns the product ID and whether the price row was newly created (true on insert,
+// false when ON CONFLICT DO NOTHING kicked in).
+func (db *DB) UpsertProductAndPrice(title, productSlug, category, imageURL string, storeID int, price float64, currency, url, manufacturerCode string) (int, bool, error) {
 	tx, err := db.conn.Begin()
 	if err != nil {
-		return fmt.Errorf("beginning transaction: %w", err)
+		return 0, false, fmt.Errorf("beginning transaction: %w", err)
 	}
 	defer tx.Rollback()
 
@@ -216,20 +218,77 @@ func (db *DB) UpsertProductAndPrice(title, productSlug, category, imageURL strin
 		RETURNING id
 	`, title, productSlug, category, imageURL, manufacturerCode, now).Scan(&productID)
 	if err != nil {
-		return fmt.Errorf("upserting product %s: %w", productSlug, err)
+		return 0, false, fmt.Errorf("upserting product %s: %w", productSlug, err)
 	}
 
 	// Insert price — skip if this product+store pair already exists.
-	_, err = tx.Exec(`
+	res, err := tx.Exec(`
 		INSERT INTO prices (product_id, store_id, current_price, currency, url, is_available, last_checked_at, created_at, updated_at)
 		VALUES ($1, $2, $3, $4, $5, true, $6, $6, $6)
 		ON CONFLICT (product_id, store_id) DO NOTHING
 	`, productID, storeID, price, currency, url, now)
 	if err != nil {
-		return fmt.Errorf("inserting price for product %d store %d: %w", productID, storeID, err)
+		return 0, false, fmt.Errorf("inserting price for product %d store %d: %w", productID, storeID, err)
 	}
+	rowsAffected, _ := res.RowsAffected()
 
-	return tx.Commit()
+	if err := tx.Commit(); err != nil {
+		return 0, false, err
+	}
+	return productID, rowsAffected > 0, nil
+}
+
+// ProductLinkInfo holds the data needed to run a per-product link job triggered by a
+// product.created RabbitMQ event.
+type ProductLinkInfo struct {
+	ID               int
+	Title            string
+	ManufacturerCode string
+	SourceSlug       string
+	SourceURL        string
+	SourcePrice      float64
+}
+
+// GetProductForLinkingByID fetches a product together with one of its existing source
+// prices so the link consumer has enough context to score candidates. Returns
+// (nil, nil) when the product has no price rows at all.
+func (db *DB) GetProductForLinkingByID(productID int, preferredSourceSlug string) (*ProductLinkInfo, error) {
+	const q = `
+		SELECT pr.id, pr.title, COALESCE(pr.manufacturer_code, ''),
+		       s.slug, COALESCE(px.url, ''), px.current_price
+		FROM products pr
+		INNER JOIN prices px ON px.product_id = pr.id
+		INNER JOIN stores s  ON s.id = px.store_id AND s.is_active = true
+		WHERE pr.id = $1
+		ORDER BY CASE WHEN s.slug = $2 THEN 0 ELSE 1 END, px.updated_at DESC
+		LIMIT 1
+	`
+	row := db.conn.QueryRow(q, productID, preferredSourceSlug)
+	var info ProductLinkInfo
+	err := row.Scan(&info.ID, &info.Title, &info.ManufacturerCode, &info.SourceSlug, &info.SourceURL, &info.SourcePrice)
+	if err == sql.ErrNoRows {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, fmt.Errorf("loading product %d for linking: %w", productID, err)
+	}
+	return &info, nil
+}
+
+// ProductHasPriceForStore reports whether productID already has a price row in the given store slug.
+func (db *DB) ProductHasPriceForStore(productID int, storeSlug string) (bool, error) {
+	const q = `
+		SELECT EXISTS (
+			SELECT 1 FROM prices p
+			INNER JOIN stores s ON s.id = p.store_id
+			WHERE p.product_id = $1 AND s.slug = $2
+		)
+	`
+	var exists bool
+	if err := db.conn.QueryRow(q, productID, storeSlug).Scan(&exists); err != nil {
+		return false, fmt.Errorf("checking price existence (product=%d store=%s): %w", productID, storeSlug, err)
+	}
+	return exists, nil
 }
 
 // SetProductManufacturerCode sets manufacturer_code when code is non-empty (overwrites existing).

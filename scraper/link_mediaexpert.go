@@ -229,60 +229,66 @@ func (app *App) runLinkMediaExpert(sourceStoreSlug, productCategory string, limi
 	}
 
 	for _, pr := range products {
-		sum.Processed++
-		queries := searchQueriesForProduct(sourceStoreSlug, pr)
-		if len(queries) == 0 {
-			sum.Errors++
-			continue
-		}
-
-		var hits []mediaExpertSearchItem
-		var lastSearchErr error
-		for _, q := range queries {
-			h, err := me.search(q, maxSearchHits)
-			if err != nil {
-				lastSearchErr = err
-				log.Printf("[link/mediaexpert] search %q (product %d): %v", q, pr.ID, err)
-				continue
-			}
-			if len(h) > 0 {
-				hits = h
-				break
-			}
-		}
-		if len(hits) == 0 {
-			if lastSearchErr != nil {
-				sum.Errors++
-			} else {
-				sum.NoSearchHits++
-			}
-			continue
-		}
-
-		linkTitle := productTitleForLinking(sourceStoreSlug, pr)
-		best, score, ok := pickBestMediaExpertHit(linkTitle, manufacturerCodeForLinking(pr.ManufacturerCode), hits)
-		if !ok || score < minScore {
-			sum.SkippedLowScore++
-			log.Printf("[link/mediaexpert] product %d: best score %.3f < %.3f — skip", pr.ID, score, minScore)
-			continue
-		}
-
-		scraped, productURL, err := scrapeResultFromMediaExpertSearchItem(&best)
-		if err != nil {
-			log.Printf("[link/mediaexpert] product %d: search hit: %v", pr.ID, err)
-			sum.Errors++
-			continue
-		}
-
-		if dryRun {
-			sum.Linked++
-			log.Printf("[link/mediaexpert] DRY product %d: would link score=%.3f url=%s", pr.ID, score, productURL)
-			continue
-		}
-
-		linkVerifyAndUpsert(app, &sum, "mediaexpert", pr, meStore.ID, scraped, productURL, score)
+		app.linkOneMediaExpert(pr, sourceStoreSlug, meStore.ID, me, minScore, maxSearchHits, dryRun, &sum)
 	}
 
 	sum.DurationMs = time.Since(start).Milliseconds()
 	return sum
+}
+
+// linkOneMediaExpert runs the full search → pick → upsert pipeline for a single product.
+// Media Expert search results already include price/availability so no extra ScrapeProduct call is needed.
+func (app *App) linkOneMediaExpert(pr ProductToLink, sourceStoreSlug string, meStoreID int, me *MediaExpertScraper, minScore float64, maxSearchHits int, dryRun bool, sum *LinkSummary) {
+	sum.Processed++
+	queries := searchQueriesForProduct(sourceStoreSlug, pr)
+	if len(queries) == 0 {
+		sum.Errors++
+		return
+	}
+
+	var hits []mediaExpertSearchItem
+	var lastSearchErr error
+	for _, q := range queries {
+		h, err := me.search(q, maxSearchHits)
+		if err != nil {
+			lastSearchErr = err
+			log.Printf("[link/mediaexpert] search %q (product %d): %v", q, pr.ID, err)
+			continue
+		}
+		if len(h) > 0 {
+			hits = h
+			break
+		}
+	}
+	if len(hits) == 0 {
+		if lastSearchErr != nil {
+			sum.Errors++
+		} else {
+			sum.NoSearchHits++
+		}
+		return
+	}
+
+	linkTitle := productTitleForLinking(sourceStoreSlug, pr)
+	best, score, ok := pickBestMediaExpertHit(linkTitle, manufacturerCodeForLinking(pr.ManufacturerCode), hits)
+	if !ok || score < minScore {
+		sum.SkippedLowScore++
+		log.Printf("[link/mediaexpert] product %d: best score %.3f < %.3f — skip", pr.ID, score, minScore)
+		return
+	}
+
+	scraped, productURL, err := scrapeResultFromMediaExpertSearchItem(&best)
+	if err != nil {
+		log.Printf("[link/mediaexpert] product %d: search hit: %v", pr.ID, err)
+		sum.Errors++
+		return
+	}
+
+	if dryRun {
+		sum.Linked++
+		log.Printf("[link/mediaexpert] DRY product %d: would link score=%.3f url=%s", pr.ID, score, productURL)
+		return
+	}
+
+	linkVerifyAndUpsert(app, sum, "mediaexpert", pr, meStoreID, scraped, productURL, score)
 }

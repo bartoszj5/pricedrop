@@ -139,59 +139,65 @@ func (app *App) runLinkMorele(sourceStoreSlug, productCategory string, limit int
 	}
 
 	for _, pr := range products {
-		sum.Processed++
-		queries := searchQueriesForProduct(sourceStoreSlug, pr)
-		if len(queries) == 0 {
-			sum.Errors++
-			continue
-		}
-
-		var hits []MoreleSearchHit
-		var lastSearchErr error
-		for _, q := range queries {
-			h, err := SearchMorele(app.config.UserAgent, searchDelay, q, maxSearchHits)
-			if err != nil {
-				lastSearchErr = err
-				log.Printf("[link/morele] search %q (product %d): %v", q, pr.ID, err)
-				continue
-			}
-			if len(h) > 0 {
-				hits = h
-				break
-			}
-		}
-		if len(hits) == 0 {
-			if lastSearchErr != nil {
-				sum.Errors++
-			} else {
-				sum.NoSearchHits++
-			}
-			continue
-		}
-
-		best, score, ok := pickBestMoreleHit(pr.Title, pr.ManufacturerCode, hits)
-		if !ok || score < minScore {
-			sum.SkippedLowScore++
-			log.Printf("[link/morele] product %d: best score %.3f < %.3f — skip", pr.ID, score, minScore)
-			continue
-		}
-
-		if dryRun {
-			sum.Linked++
-			log.Printf("[link/morele] DRY product %d: would link score=%.3f url=%s", pr.ID, score, best.URL)
-			continue
-		}
-
-		scraped, err := scraper.ScrapeProduct(best.URL)
-		if err != nil {
-			log.Printf("[link/morele] scrape %s (product %d): %v", best.URL, pr.ID, err)
-			sum.Errors++
-			continue
-		}
-
-		linkVerifyAndUpsert(app, &sum, "morele", pr, moreleStore.ID, scraped, best.URL, score)
+		app.linkOneMorele(pr, sourceStoreSlug, moreleStore.ID, scraper, searchDelay, minScore, maxSearchHits, dryRun, &sum)
 	}
 
 	sum.DurationMs = time.Since(start).Milliseconds()
 	return sum
+}
+
+// linkOneMorele runs the full search → pick → scrape → upsert pipeline for a single product.
+// Mutates sum with the outcome counters so the same helper serves both batch and consumer paths.
+func (app *App) linkOneMorele(pr ProductToLink, sourceStoreSlug string, moreleStoreID int, scraper StoreScraper, searchDelay time.Duration, minScore float64, maxSearchHits int, dryRun bool, sum *LinkSummary) {
+	sum.Processed++
+	queries := searchQueriesForProduct(sourceStoreSlug, pr)
+	if len(queries) == 0 {
+		sum.Errors++
+		return
+	}
+
+	var hits []MoreleSearchHit
+	var lastSearchErr error
+	for _, q := range queries {
+		h, err := SearchMorele(app.config.UserAgent, searchDelay, q, maxSearchHits)
+		if err != nil {
+			lastSearchErr = err
+			log.Printf("[link/morele] search %q (product %d): %v", q, pr.ID, err)
+			continue
+		}
+		if len(h) > 0 {
+			hits = h
+			break
+		}
+	}
+	if len(hits) == 0 {
+		if lastSearchErr != nil {
+			sum.Errors++
+		} else {
+			sum.NoSearchHits++
+		}
+		return
+	}
+
+	best, score, ok := pickBestMoreleHit(pr.Title, pr.ManufacturerCode, hits)
+	if !ok || score < minScore {
+		sum.SkippedLowScore++
+		log.Printf("[link/morele] product %d: best score %.3f < %.3f — skip", pr.ID, score, minScore)
+		return
+	}
+
+	if dryRun {
+		sum.Linked++
+		log.Printf("[link/morele] DRY product %d: would link score=%.3f url=%s", pr.ID, score, best.URL)
+		return
+	}
+
+	scraped, err := scraper.ScrapeProduct(best.URL)
+	if err != nil {
+		log.Printf("[link/morele] scrape %s (product %d): %v", best.URL, pr.ID, err)
+		sum.Errors++
+		return
+	}
+
+	linkVerifyAndUpsert(app, sum, "morele", pr, moreleStoreID, scraped, best.URL, score)
 }

@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"encoding/json"
 	"log"
 	"math"
@@ -119,6 +120,14 @@ func main() {
 		publisher:       pub,
 		registry:        registry,
 		crawlerRegistry: crawlerRegistry,
+	}
+
+	if pub != nil {
+		consumer := NewLinkConsumer(app)
+		go consumer.Run(context.Background())
+		log.Printf("[link/consumer] started")
+	} else {
+		log.Printf("[link/consumer] not started — RabbitMQ unavailable")
 	}
 
 	mux := http.NewServeMux()
@@ -611,7 +620,7 @@ func (app *App) crawlStoreCategory(storeSlug, category, categoryURL string, maxP
 
 		cleanTitle := cleanProductTitle(title)
 		productSlug := slugify(normalizeTitle(cleanTitle))
-		err = app.db.UpsertProductAndPrice(cleanTitle, productSlug, category, imageURL, store.ID, price, currency, dp.URL, manufacturerCode)
+		productID, priceCreated, err := app.db.UpsertProductAndPrice(cleanTitle, productSlug, category, imageURL, store.ID, price, currency, dp.URL, manufacturerCode)
 		if err != nil {
 			log.Printf("[crawl/%s] Error upserting %s: %v", storeSlug, title, err)
 			result.Errors++
@@ -620,6 +629,15 @@ func (app *App) crawlStoreCategory(storeSlug, category, categoryURL string, maxP
 
 		log.Printf("[crawl/%s] NEW: %s (%.2f %s)", storeSlug, title, price, currency)
 		result.New++
+
+		if priceCreated && app.publisher != nil {
+			app.publisher.PublishProductCreated(ProductCreatedEvent{
+				ProductID:        productID,
+				SourceSlug:       storeSlug,
+				Title:            cleanTitle,
+				ManufacturerCode: manufacturerCode,
+			})
+		}
 	}
 
 	result.DurationMs = time.Since(start).Milliseconds()
