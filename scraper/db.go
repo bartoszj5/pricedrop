@@ -120,7 +120,9 @@ func (db *DB) GetAllActivePrices() ([]PriceWithContext, error) {
 
 // UpdatePrice updates the current price and availability, and inserts a price history
 // record if the price changed. Returns true if the price was changed.
-func (db *DB) UpdatePrice(priceID int, oldPrice, newPrice float64, currency string, isAvailable bool) (bool, error) {
+// storeTitle is the product name as scraped from the store page; when empty, the existing
+// store_title value is kept.
+func (db *DB) UpdatePrice(priceID int, oldPrice, newPrice float64, currency string, isAvailable bool, storeTitle string) (bool, error) {
 	tx, err := db.conn.Begin()
 	if err != nil {
 		return false, fmt.Errorf("beginning transaction: %w", err)
@@ -129,12 +131,17 @@ func (db *DB) UpdatePrice(priceID int, oldPrice, newPrice float64, currency stri
 
 	now := time.Now().UTC()
 
-	// Update the price record.
+	// Update the price record. COALESCE keeps the old store_title when the scrape
+	// didn't return one (empty string → NULL via NULLIF), so we never erase it.
 	_, err = tx.Exec(`
 		UPDATE prices
-		SET current_price = $1, is_available = $2, last_checked_at = $3, updated_at = $3
+		SET current_price = $1,
+		    is_available = $2,
+		    last_checked_at = $3,
+		    updated_at = $3,
+		    store_title = COALESCE(NULLIF($5, ''), store_title)
 		WHERE id = $4
-	`, newPrice, isAvailable, now, priceID)
+	`, newPrice, isAvailable, now, priceID, storeTitle)
 	if err != nil {
 		return false, fmt.Errorf("updating price %d: %w", priceID, err)
 	}
@@ -195,9 +202,11 @@ func (db *DB) PriceExistsByURL(url string) (bool, error) {
 // creates a price record linking it to the given store. If the price record
 // already exists (product_id, store_id unique constraint), it is skipped.
 // manufacturerCode: when non-empty, set on insert or overwrite on conflict when provided.
+// storeTitle is the product name as scraped from the store page (may differ from the
+// canonical product title); stored for later title-similarity audits.
 // Returns the product ID and whether the price row was newly created (true on insert,
 // false when ON CONFLICT DO NOTHING kicked in).
-func (db *DB) UpsertProductAndPrice(title, productSlug, category, imageURL string, storeID int, price float64, currency, url, manufacturerCode string) (int, bool, error) {
+func (db *DB) UpsertProductAndPrice(title, productSlug, category, imageURL string, storeID int, price float64, currency, url, manufacturerCode, storeTitle string) (int, bool, error) {
 	tx, err := db.conn.Begin()
 	if err != nil {
 		return 0, false, fmt.Errorf("beginning transaction: %w", err)
@@ -223,10 +232,10 @@ func (db *DB) UpsertProductAndPrice(title, productSlug, category, imageURL strin
 
 	// Insert price — skip if this product+store pair already exists.
 	res, err := tx.Exec(`
-		INSERT INTO prices (product_id, store_id, current_price, currency, url, is_available, last_checked_at, created_at, updated_at)
-		VALUES ($1, $2, $3, $4, $5, true, $6, $6, $6)
+		INSERT INTO prices (product_id, store_id, current_price, currency, url, store_title, is_available, last_checked_at, created_at, updated_at)
+		VALUES ($1, $2, $3, $4, $5, NULLIF(TRIM($7), ''), true, $6, $6, $6)
 		ON CONFLICT (product_id, store_id) DO NOTHING
-	`, productID, storeID, price, currency, url, now)
+	`, productID, storeID, price, currency, url, now, storeTitle)
 	if err != nil {
 		return 0, false, fmt.Errorf("inserting price for product %d store %d: %w", productID, storeID, err)
 	}
@@ -414,7 +423,9 @@ func (db *DB) ListProductsWithSourceWithoutTargetStore(sourceStoreSlug, targetSt
 
 // UpsertPriceForProduct inserts or updates a price for an existing product and store.
 // When the price value changes on update, a row is appended to price_history.
-func (db *DB) UpsertPriceForProduct(productID, storeID int, newPrice float64, currency, productURL string, isAvailable bool) error {
+// storeTitle is the product name as scraped from the store page; when empty, the existing
+// store_title value (if any) is kept on update.
+func (db *DB) UpsertPriceForProduct(productID, storeID int, newPrice float64, currency, productURL string, isAvailable bool, storeTitle string) error {
 	tx, err := db.conn.Begin()
 	if err != nil {
 		return fmt.Errorf("beginning transaction: %w", err)
@@ -432,9 +443,9 @@ func (db *DB) UpsertPriceForProduct(productID, storeID int, newPrice float64, cu
 
 	if err == sql.ErrNoRows {
 		_, err = tx.Exec(`
-			INSERT INTO prices (product_id, store_id, current_price, currency, url, is_available, last_checked_at, created_at, updated_at)
-			VALUES ($1, $2, $3, $4, $5, $6, $7, $7, $7)
-		`, productID, storeID, newRounded, currency, productURL, isAvailable, now)
+			INSERT INTO prices (product_id, store_id, current_price, currency, url, store_title, is_available, last_checked_at, created_at, updated_at)
+			VALUES ($1, $2, $3, $4, $5, NULLIF(TRIM($8), ''), $6, $7, $7, $7)
+		`, productID, storeID, newRounded, currency, productURL, isAvailable, now, storeTitle)
 		if err != nil {
 			return fmt.Errorf("inserting price for product %d store %d: %w", productID, storeID, err)
 		}
@@ -446,9 +457,15 @@ func (db *DB) UpsertPriceForProduct(productID, storeID int, newPrice float64, cu
 
 	_, err = tx.Exec(`
 		UPDATE prices
-		SET current_price = $1, currency = $2, url = $3, is_available = $4, last_checked_at = $5, updated_at = $5
+		SET current_price = $1,
+		    currency = $2,
+		    url = $3,
+		    is_available = $4,
+		    last_checked_at = $5,
+		    updated_at = $5,
+		    store_title = COALESCE(NULLIF(TRIM($7), ''), store_title)
 		WHERE id = $6
-	`, newRounded, currency, productURL, isAvailable, now, priceID)
+	`, newRounded, currency, productURL, isAvailable, now, priceID, storeTitle)
 	if err != nil {
 		return fmt.Errorf("updating price %d: %w", priceID, err)
 	}

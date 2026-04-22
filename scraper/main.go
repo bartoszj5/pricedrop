@@ -326,7 +326,7 @@ func (app *App) scrapeStore(storeSlug string) ScrapeStoreResult {
 		newPrice := math.Round(scraped.Price*100) / 100
 		oldPrice := math.Round(p.CurrentPrice*100) / 100
 
-		changed, err := app.db.UpdatePrice(p.ID, oldPrice, newPrice, scraped.Currency, scraped.IsAvailable)
+		changed, err := app.db.UpdatePrice(p.ID, oldPrice, newPrice, scraped.Currency, scraped.IsAvailable, scraped.ProductName)
 		if err != nil {
 			log.Printf("[%s] Error updating price for %s: %v", storeSlug, p.ProductTitle, err)
 			result.Errors++
@@ -620,7 +620,7 @@ func (app *App) crawlStoreCategory(storeSlug, category, categoryURL string, maxP
 
 		cleanTitle := cleanProductTitle(title)
 		productSlug := slugify(normalizeTitle(cleanTitle))
-		productID, priceCreated, err := app.db.UpsertProductAndPrice(cleanTitle, productSlug, category, imageURL, store.ID, price, currency, dp.URL, manufacturerCode)
+		productID, priceCreated, err := app.db.UpsertProductAndPrice(cleanTitle, productSlug, category, imageURL, store.ID, price, currency, dp.URL, manufacturerCode, title)
 		if err != nil {
 			log.Printf("[crawl/%s] Error upserting %s: %v", storeSlug, title, err)
 			result.Errors++
