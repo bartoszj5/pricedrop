@@ -23,6 +23,7 @@ type App struct {
 	linkMEGuard     jobGuard
 	linkAmazonGuard jobGuard
 	enrichGuard     jobGuard
+	auditPruneGuard jobGuard
 }
 
 // linkParams holds the common query parameters shared by all /link/* handlers.
@@ -142,6 +143,7 @@ func main() {
 	mux.HandleFunc("/link/amazon", app.requireInternalToken(app.handleLink("amazon", 0.50, &app.linkAmazonGuard, app.runLinkAmazon)))
 	mux.HandleFunc("/enrich/x-kom-manufacturer-code", app.requireInternalToken(app.handleEnrichXKOMManufacturer))
 	mux.HandleFunc("/audit/titles", app.requireInternalToken(app.handleAuditTitles))
+	mux.HandleFunc("/audit/titles/prune", app.requireInternalToken(app.handleAuditTitlesPrune))
 
 	log.Printf("Scraper listening on :%s", cfg.Port)
 	log.Printf("Registered scrapers: %v", registry.RegisteredSlugs())

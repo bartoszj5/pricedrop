@@ -8,7 +8,7 @@ import (
 	"strings"
 	"time"
 
-	_ "github.com/lib/pq"
+	"github.com/lib/pq"
 )
 
 type DB struct {
@@ -264,6 +264,34 @@ func (db *DB) UpdatePrice(priceID int, oldPrice, newPrice float64, currency stri
 		return false, fmt.Errorf("committing transaction: %w", err)
 	}
 	return priceChanged, nil
+}
+
+// DeletePrices hard-deletes the given price rows along with their price_history rows
+// in one transaction. Used by the /audit/titles/prune endpoint for cleaning up
+// confidently-wrong store links discovered by the title-similarity audit.
+func (db *DB) DeletePrices(priceIDs []int) (int, error) {
+	if len(priceIDs) == 0 {
+		return 0, nil
+	}
+	tx, err := db.conn.Begin()
+	if err != nil {
+		return 0, fmt.Errorf("beginning transaction: %w", err)
+	}
+	defer tx.Rollback()
+
+	ids := pq.Array(priceIDs)
+	if _, err := tx.Exec(`DELETE FROM price_history WHERE price_id = ANY($1)`, ids); err != nil {
+		return 0, fmt.Errorf("deleting price_history: %w", err)
+	}
+	res, err := tx.Exec(`DELETE FROM prices WHERE id = ANY($1)`, ids)
+	if err != nil {
+		return 0, fmt.Errorf("deleting prices: %w", err)
+	}
+	n, _ := res.RowsAffected()
+	if err := tx.Commit(); err != nil {
+		return 0, fmt.Errorf("committing delete: %w", err)
+	}
+	return int(n), nil
 }
 
 // MarkChecked updates last_checked_at without changing the price.
