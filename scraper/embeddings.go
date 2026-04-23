@@ -50,6 +50,18 @@ type embeddingsSimilarityResponse struct {
 	Scores []float64 `json:"scores"`
 }
 
+type embeddingsEmbedRequest struct {
+	Texts []string `json:"texts"`
+}
+
+type embeddingsEmbedResponse struct {
+	Dim        int         `json:"dim"`
+	Embeddings [][]float64 `json:"embeddings"`
+}
+
+// EmbeddingsBatchLimit matches the server's MAX_CANDIDATES (see embeddings/main.py).
+const EmbeddingsBatchLimit = 100
+
 const embeddingsCooldown = 30 * time.Second
 
 func (c *EmbeddingsClient) isSuspended() bool {
@@ -107,6 +119,60 @@ func (c *EmbeddingsClient) Similarity(ctx context.Context, query string, candida
 		return nil, fmt.Errorf("embeddings returned %d scores for %d candidates", len(out.Scores), len(candidates))
 	}
 	return out.Scores, nil
+}
+
+// Embed returns normalised embedding vectors for up to EmbeddingsBatchLimit texts.
+// Caller must page larger inputs. Unlike Similarity, this does not touch the circuit
+// breaker — callers doing large sweeps (audit, bulk linking) need to proceed even when
+// a single batch fails, and handle fallbacks themselves.
+// batchTimeout overrides the default client timeout for this one call (useful for cold
+// starts / 100-text batches that legitimately take >5s); pass 0 to use the default.
+func (c *EmbeddingsClient) Embed(ctx context.Context, texts []string, batchTimeout time.Duration) ([][]float64, error) {
+	if c == nil {
+		return nil, errors.New("embeddings client not configured")
+	}
+	if len(texts) == 0 {
+		return nil, nil
+	}
+	if len(texts) > EmbeddingsBatchLimit {
+		return nil, fmt.Errorf("embed batch too large: %d (max %d)", len(texts), EmbeddingsBatchLimit)
+	}
+
+	body, err := json.Marshal(embeddingsEmbedRequest{Texts: texts})
+	if err != nil {
+		return nil, err
+	}
+
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, c.baseURL+"/embed", bytes.NewReader(body))
+	if err != nil {
+		return nil, err
+	}
+	req.Header.Set("Content-Type", "application/json")
+
+	client := c.http
+	if batchTimeout > 0 && batchTimeout != c.timeout {
+		client = &http.Client{Timeout: batchTimeout}
+	}
+
+	resp, err := client.Do(req)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		rb, _ := io.ReadAll(resp.Body)
+		return nil, fmt.Errorf("embeddings /embed %s: %s", resp.Status, strings.TrimSpace(string(rb)))
+	}
+
+	var out embeddingsEmbedResponse
+	if err := json.NewDecoder(resp.Body).Decode(&out); err != nil {
+		return nil, err
+	}
+	if len(out.Embeddings) != len(texts) {
+		return nil, fmt.Errorf("embeddings /embed returned %d vectors for %d texts", len(out.Embeddings), len(texts))
+	}
+	return out.Embeddings, nil
 }
 
 // embeddingsClient is the package-level client used by the linker helpers.
