@@ -118,6 +118,107 @@ func (db *DB) GetAllActivePrices() ([]PriceWithContext, error) {
 	return prices, rows.Err()
 }
 
+// AuditCandidate is one price row (one store's offer) participating in a title audit.
+type AuditCandidate struct {
+	PriceID      int
+	StoreID      int
+	StoreSlug    string
+	StoreName    string
+	StoreTitle   string
+	URL          string
+	CurrentPrice float64
+}
+
+// AuditGroup is all price rows for one product that have a store_title available
+// for similarity comparison against the canonical product.title.
+type AuditGroup struct {
+	ProductID        int
+	ProductTitle     string
+	ProductCategory  string
+	ManufacturerCode sql.NullString
+	Candidates       []AuditCandidate
+}
+
+// GetPricesForAudit returns price rows with a non-empty store_title, grouped by product,
+// for title-similarity auditing. Optional filters: storeSlug restricts to offers from
+// one store; category restricts by product category. Groups with no candidates are omitted.
+func (db *DB) GetPricesForAudit(storeSlug, category string) ([]AuditGroup, error) {
+	args := []any{}
+	where := []string{"s.is_active = true", "p.store_title IS NOT NULL", "TRIM(p.store_title) <> ''"}
+	if strings.TrimSpace(storeSlug) != "" {
+		args = append(args, storeSlug)
+		where = append(where, fmt.Sprintf("s.slug = $%d", len(args)))
+	}
+	if strings.TrimSpace(category) != "" {
+		args = append(args, category)
+		where = append(where, fmt.Sprintf("pr.category = $%d", len(args)))
+	}
+
+	query := fmt.Sprintf(`
+		SELECT
+			pr.id, pr.title, pr.category, pr.manufacturer_code,
+			p.id, p.store_id, s.slug, s.name, p.store_title, p.url, p.current_price
+		FROM prices p
+		JOIN stores s   ON s.id = p.store_id
+		JOIN products pr ON pr.id = p.product_id
+		WHERE %s
+		ORDER BY pr.id, p.id
+	`, strings.Join(where, " AND "))
+
+	rows, err := db.conn.Query(query, args...)
+	if err != nil {
+		return nil, fmt.Errorf("querying audit rows: %w", err)
+	}
+	defer rows.Close()
+
+	groups := make([]AuditGroup, 0)
+	byProduct := make(map[int]int) // product_id -> index in groups
+
+	for rows.Next() {
+		var (
+			productID       int
+			productTitle    string
+			productCategory string
+			mfr             sql.NullString
+			priceID         int
+			storeID         int
+			storeSlugOut    string
+			storeName       string
+			storeTitle      string
+			url             string
+			currentPrice    float64
+		)
+		if err := rows.Scan(
+			&productID, &productTitle, &productCategory, &mfr,
+			&priceID, &storeID, &storeSlugOut, &storeName, &storeTitle, &url, &currentPrice,
+		); err != nil {
+			return nil, fmt.Errorf("scanning audit row: %w", err)
+		}
+
+		idx, ok := byProduct[productID]
+		if !ok {
+			groups = append(groups, AuditGroup{
+				ProductID:        productID,
+				ProductTitle:     productTitle,
+				ProductCategory:  productCategory,
+				ManufacturerCode: mfr,
+			})
+			idx = len(groups) - 1
+			byProduct[productID] = idx
+		}
+		groups[idx].Candidates = append(groups[idx].Candidates, AuditCandidate{
+			PriceID:      priceID,
+			StoreID:      storeID,
+			StoreSlug:    storeSlugOut,
+			StoreName:    storeName,
+			StoreTitle:   storeTitle,
+			URL:          url,
+			CurrentPrice: currentPrice,
+		})
+	}
+	return groups, rows.Err()
+}
+
 // UpdatePrice updates the current price and availability, and inserts a price history
 // record if the price changed. Returns true if the price was changed.
 // storeTitle is the product name as scraped from the store page; when empty, the existing

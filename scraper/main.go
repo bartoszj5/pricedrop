@@ -141,6 +141,7 @@ func main() {
 	mux.HandleFunc("/link/mediaexpert", app.requireInternalToken(app.handleLink("mediaexpert", 0.45, &app.linkMEGuard, app.runLinkMediaExpert)))
 	mux.HandleFunc("/link/amazon", app.requireInternalToken(app.handleLink("amazon", 0.50, &app.linkAmazonGuard, app.runLinkAmazon)))
 	mux.HandleFunc("/enrich/x-kom-manufacturer-code", app.requireInternalToken(app.handleEnrichXKOMManufacturer))
+	mux.HandleFunc("/audit/titles", app.requireInternalToken(app.handleAuditTitles))
 
 	log.Printf("Scraper listening on :%s", cfg.Port)
 	log.Printf("Registered scrapers: %v", registry.RegisteredSlugs())
