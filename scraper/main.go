@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"encoding/json"
 	"log"
 	"math"
@@ -22,6 +23,7 @@ type App struct {
 	linkMEGuard     jobGuard
 	linkAmazonGuard jobGuard
 	enrichGuard     jobGuard
+	auditPruneGuard jobGuard
 }
 
 // linkParams holds the common query parameters shared by all /link/* handlers.
@@ -106,12 +108,27 @@ func main() {
 		defer pub.Close()
 	}
 
+	embeddingsClient = NewEmbeddingsClient(cfg.EmbeddingsURL, cfg.EmbeddingsTimeout)
+	if embeddingsClient != nil {
+		log.Printf("Embeddings service configured: %s (timeout=%s)", cfg.EmbeddingsURL, cfg.EmbeddingsTimeout)
+	} else {
+		log.Printf("Embeddings service disabled — linker falls back to Jaccard title matching")
+	}
+
 	app := &App{
 		config:          cfg,
 		db:              db,
 		publisher:       pub,
 		registry:        registry,
 		crawlerRegistry: crawlerRegistry,
+	}
+
+	if pub != nil {
+		consumer := NewLinkConsumer(app)
+		go consumer.Run(context.Background())
+		log.Printf("[link/consumer] started")
+	} else {
+		log.Printf("[link/consumer] not started — RabbitMQ unavailable")
 	}
 
 	mux := http.NewServeMux()
@@ -125,6 +142,8 @@ func main() {
 	mux.HandleFunc("/link/mediaexpert", app.requireInternalToken(app.handleLink("mediaexpert", 0.45, &app.linkMEGuard, app.runLinkMediaExpert)))
 	mux.HandleFunc("/link/amazon", app.requireInternalToken(app.handleLink("amazon", 0.50, &app.linkAmazonGuard, app.runLinkAmazon)))
 	mux.HandleFunc("/enrich/x-kom-manufacturer-code", app.requireInternalToken(app.handleEnrichXKOMManufacturer))
+	mux.HandleFunc("/audit/titles", app.requireInternalToken(app.handleAuditTitles))
+	mux.HandleFunc("/audit/titles/prune", app.requireInternalToken(app.handleAuditTitlesPrune))
 
 	log.Printf("Scraper listening on :%s", cfg.Port)
 	log.Printf("Registered scrapers: %v", registry.RegisteredSlugs())
@@ -310,7 +329,7 @@ func (app *App) scrapeStore(storeSlug string) ScrapeStoreResult {
 		newPrice := math.Round(scraped.Price*100) / 100
 		oldPrice := math.Round(p.CurrentPrice*100) / 100
 
-		changed, err := app.db.UpdatePrice(p.ID, oldPrice, newPrice, scraped.Currency, scraped.IsAvailable)
+		changed, err := app.db.UpdatePrice(p.ID, oldPrice, newPrice, scraped.Currency, scraped.IsAvailable, scraped.ProductName)
 		if err != nil {
 			log.Printf("[%s] Error updating price for %s: %v", storeSlug, p.ProductTitle, err)
 			result.Errors++
@@ -604,7 +623,7 @@ func (app *App) crawlStoreCategory(storeSlug, category, categoryURL string, maxP
 
 		cleanTitle := cleanProductTitle(title)
 		productSlug := slugify(normalizeTitle(cleanTitle))
-		err = app.db.UpsertProductAndPrice(cleanTitle, productSlug, category, imageURL, store.ID, price, currency, dp.URL, manufacturerCode)
+		productID, priceCreated, err := app.db.UpsertProductAndPrice(cleanTitle, productSlug, category, imageURL, store.ID, price, currency, dp.URL, manufacturerCode, title)
 		if err != nil {
 			log.Printf("[crawl/%s] Error upserting %s: %v", storeSlug, title, err)
 			result.Errors++
@@ -613,6 +632,15 @@ func (app *App) crawlStoreCategory(storeSlug, category, categoryURL string, maxP
 
 		log.Printf("[crawl/%s] NEW: %s (%.2f %s)", storeSlug, title, price, currency)
 		result.New++
+
+		if priceCreated && app.publisher != nil {
+			app.publisher.PublishProductCreated(ProductCreatedEvent{
+				ProductID:        productID,
+				SourceSlug:       storeSlug,
+				Title:            cleanTitle,
+				ManufacturerCode: manufacturerCode,
+			})
+		}
 	}
 
 	result.DurationMs = time.Since(start).Milliseconds()

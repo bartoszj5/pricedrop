@@ -65,6 +65,7 @@ class Price(SQLModel, table=True):
     current_price: Decimal = Field(max_digits=10, decimal_places=2)
     currency: str = Field(default="PLN", max_length=3)
     url: str = Field(max_length=512)
+    store_title: str | None = Field(default=None, max_length=512)
     is_available: bool = Field(default=True)
     last_checked_at: datetime | None = Field(default=None)
     created_at: datetime = Field(

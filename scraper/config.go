@@ -28,6 +28,10 @@ type Config struct {
 	APIInternalURL string
 	// APIInternalToken, if set, is sent as the X-Internal-Token header.
 	APIInternalToken string
+	// EmbeddingsURL points at the embeddings service. Empty disables semantic scoring
+	// and falls back to Jaccard-only title matching in linkers.
+	EmbeddingsURL     string
+	EmbeddingsTimeout time.Duration
 }
 
 func LoadConfig() Config {
@@ -44,6 +48,8 @@ func LoadConfig() Config {
 		UserAgent:          getEnv("USER_AGENT", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36"),
 		APIInternalURL:     getEnv("API_INTERNAL_URL", "http://api:8000"),
 		APIInternalToken:   getEnv("INTERNAL_API_TOKEN", ""),
+		EmbeddingsURL:      getEnv("EMBEDDINGS_URL", ""),
+		EmbeddingsTimeout:  time.Duration(getEnvInt("EMBEDDINGS_TIMEOUT_MS", 5000)) * time.Millisecond,
 	}
 }
 

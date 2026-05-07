@@ -32,7 +32,7 @@ STORES = [
     },
     {
         "name": "Media Expert",
-        "slug": "media-expert",
+        "slug": "mediaexpert",
         "url": "https://www.mediaexpert.pl",
         "logo_url": "https://www.mediaexpert.pl/favicon.ico",
         "is_active": True,
@@ -137,7 +137,7 @@ STORE_MULTIPLIERS = {
     "steam": Decimal("0.95"),
     "x-kom": Decimal("1.01"),
     "morele": Decimal("1.00"),
-    "media-expert": Decimal("1.03"),
+    "mediaexpert": Decimal("1.03"),
     "allegro": Decimal("0.98"),
 }
 

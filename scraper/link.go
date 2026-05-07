@@ -198,7 +198,7 @@ func linkVerifyAndUpsert(app *App, sum *LinkSummary, storeName string, pr Produc
 		currency = "PLN"
 	}
 
-	if err := app.db.UpsertPriceForProduct(pr.ID, storeID, newPrice, currency, productURL, scraped.IsAvailable); err != nil {
+	if err := app.db.UpsertPriceForProduct(pr.ID, storeID, newPrice, currency, productURL, scraped.IsAvailable, scraped.ProductName); err != nil {
 		log.Printf("[link/%s] upsert price product %d: %v", storeName, pr.ID, err)
 		sum.Errors++
 		return false

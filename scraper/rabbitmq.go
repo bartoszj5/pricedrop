@@ -10,8 +10,11 @@ import (
 )
 
 const (
-	exchangeName = "price_events"
-	exchangeKind = "topic"
+	exchangeName              = "price_events"
+	exchangeKind              = "topic"
+	priceDroppedRoutingKey    = "price.dropped"
+	productCreatedRoutingKey  = "product.created"
+	productCreatedQueueName   = "scraper.product.created"
 )
 
 // PriceDroppedEvent is the payload published to RabbitMQ when a price drops.
@@ -22,6 +25,17 @@ type PriceDroppedEvent struct {
 	OldPrice     float64 `json:"old_price"`
 	NewPrice     float64 `json:"new_price"`
 	URL          string  `json:"url"`
+}
+
+// ProductCreatedEvent fires when the crawler writes a new price row — either because
+// the product was just discovered, or because an existing product now has its first
+// price in a new source store. The link consumer uses this to fan out a single-product
+// link against every other target store.
+type ProductCreatedEvent struct {
+	ProductID        int    `json:"product_id"`
+	SourceSlug       string `json:"source_slug"`
+	Title            string `json:"title,omitempty"`
+	ManufacturerCode string `json:"manufacturer_code,omitempty"`
 }
 
 // Publisher sends messages to RabbitMQ.
@@ -63,9 +77,21 @@ func NewPublisher(url string) (*Publisher, error) {
 
 // PublishPriceDropped publishes a price.dropped event.
 func (p *Publisher) PublishPriceDropped(event PriceDroppedEvent) {
-	body, err := json.Marshal(event)
+	p.publish(priceDroppedRoutingKey, event)
+}
+
+// PublishProductCreated publishes a product.created event consumed by the link consumer.
+func (p *Publisher) PublishProductCreated(event ProductCreatedEvent) {
+	p.publish(productCreatedRoutingKey, event)
+}
+
+func (p *Publisher) publish(routingKey string, payload any) {
+	if p == nil || p.ch == nil {
+		return
+	}
+	body, err := json.Marshal(payload)
 	if err != nil {
-		log.Printf("[rabbitmq] failed to marshal event: %v", err)
+		log.Printf("[rabbitmq] failed to marshal %s: %v", routingKey, err)
 		return
 	}
 
@@ -74,7 +100,7 @@ func (p *Publisher) PublishPriceDropped(event PriceDroppedEvent) {
 
 	err = p.ch.PublishWithContext(ctx,
 		exchangeName,
-		"price.dropped",
+		routingKey,
 		false, // mandatory
 		false, // immediate
 		amqp.Publishing{
@@ -83,7 +109,7 @@ func (p *Publisher) PublishPriceDropped(event PriceDroppedEvent) {
 		},
 	)
 	if err != nil {
-		log.Printf("[rabbitmq] failed to publish price.dropped: %v", err)
+		log.Printf("[rabbitmq] failed to publish %s: %v", routingKey, err)
 	}
 }
 

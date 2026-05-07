@@ -8,7 +8,7 @@ import (
 	"strings"
 	"time"
 
-	_ "github.com/lib/pq"
+	"github.com/lib/pq"
 )
 
 type DB struct {
@@ -118,9 +118,112 @@ func (db *DB) GetAllActivePrices() ([]PriceWithContext, error) {
 	return prices, rows.Err()
 }
 
+// AuditCandidate is one price row (one store's offer) participating in a title audit.
+type AuditCandidate struct {
+	PriceID      int
+	StoreID      int
+	StoreSlug    string
+	StoreName    string
+	StoreTitle   string
+	URL          string
+	CurrentPrice float64
+}
+
+// AuditGroup is all price rows for one product that have a store_title available
+// for similarity comparison against the canonical product.title.
+type AuditGroup struct {
+	ProductID        int
+	ProductTitle     string
+	ProductCategory  string
+	ManufacturerCode sql.NullString
+	Candidates       []AuditCandidate
+}
+
+// GetPricesForAudit returns price rows with a non-empty store_title, grouped by product,
+// for title-similarity auditing. Optional filters: storeSlug restricts to offers from
+// one store; category restricts by product category. Groups with no candidates are omitted.
+func (db *DB) GetPricesForAudit(storeSlug, category string) ([]AuditGroup, error) {
+	args := []any{}
+	where := []string{"s.is_active = true", "p.store_title IS NOT NULL", "TRIM(p.store_title) <> ''"}
+	if strings.TrimSpace(storeSlug) != "" {
+		args = append(args, storeSlug)
+		where = append(where, fmt.Sprintf("s.slug = $%d", len(args)))
+	}
+	if strings.TrimSpace(category) != "" {
+		args = append(args, category)
+		where = append(where, fmt.Sprintf("pr.category = $%d", len(args)))
+	}
+
+	query := fmt.Sprintf(`
+		SELECT
+			pr.id, pr.title, pr.category, pr.manufacturer_code,
+			p.id, p.store_id, s.slug, s.name, p.store_title, p.url, p.current_price
+		FROM prices p
+		JOIN stores s   ON s.id = p.store_id
+		JOIN products pr ON pr.id = p.product_id
+		WHERE %s
+		ORDER BY pr.id, p.id
+	`, strings.Join(where, " AND "))
+
+	rows, err := db.conn.Query(query, args...)
+	if err != nil {
+		return nil, fmt.Errorf("querying audit rows: %w", err)
+	}
+	defer rows.Close()
+
+	groups := make([]AuditGroup, 0)
+	byProduct := make(map[int]int) // product_id -> index in groups
+
+	for rows.Next() {
+		var (
+			productID       int
+			productTitle    string
+			productCategory string
+			mfr             sql.NullString
+			priceID         int
+			storeID         int
+			storeSlugOut    string
+			storeName       string
+			storeTitle      string
+			url             string
+			currentPrice    float64
+		)
+		if err := rows.Scan(
+			&productID, &productTitle, &productCategory, &mfr,
+			&priceID, &storeID, &storeSlugOut, &storeName, &storeTitle, &url, &currentPrice,
+		); err != nil {
+			return nil, fmt.Errorf("scanning audit row: %w", err)
+		}
+
+		idx, ok := byProduct[productID]
+		if !ok {
+			groups = append(groups, AuditGroup{
+				ProductID:        productID,
+				ProductTitle:     productTitle,
+				ProductCategory:  productCategory,
+				ManufacturerCode: mfr,
+			})
+			idx = len(groups) - 1
+			byProduct[productID] = idx
+		}
+		groups[idx].Candidates = append(groups[idx].Candidates, AuditCandidate{
+			PriceID:      priceID,
+			StoreID:      storeID,
+			StoreSlug:    storeSlugOut,
+			StoreName:    storeName,
+			StoreTitle:   storeTitle,
+			URL:          url,
+			CurrentPrice: currentPrice,
+		})
+	}
+	return groups, rows.Err()
+}
+
 // UpdatePrice updates the current price and availability, and inserts a price history
 // record if the price changed. Returns true if the price was changed.
-func (db *DB) UpdatePrice(priceID int, oldPrice, newPrice float64, currency string, isAvailable bool) (bool, error) {
+// storeTitle is the product name as scraped from the store page; when empty, the existing
+// store_title value is kept.
+func (db *DB) UpdatePrice(priceID int, oldPrice, newPrice float64, currency string, isAvailable bool, storeTitle string) (bool, error) {
 	tx, err := db.conn.Begin()
 	if err != nil {
 		return false, fmt.Errorf("beginning transaction: %w", err)
@@ -129,12 +232,17 @@ func (db *DB) UpdatePrice(priceID int, oldPrice, newPrice float64, currency stri
 
 	now := time.Now().UTC()
 
-	// Update the price record.
+	// Update the price record. COALESCE keeps the old store_title when the scrape
+	// didn't return one (empty string → NULL via NULLIF), so we never erase it.
 	_, err = tx.Exec(`
 		UPDATE prices
-		SET current_price = $1, is_available = $2, last_checked_at = $3, updated_at = $3
+		SET current_price = $1,
+		    is_available = $2,
+		    last_checked_at = $3,
+		    updated_at = $3,
+		    store_title = COALESCE(NULLIF($5, ''), store_title)
 		WHERE id = $4
-	`, newPrice, isAvailable, now, priceID)
+	`, newPrice, isAvailable, now, priceID, storeTitle)
 	if err != nil {
 		return false, fmt.Errorf("updating price %d: %w", priceID, err)
 	}
@@ -156,6 +264,34 @@ func (db *DB) UpdatePrice(priceID int, oldPrice, newPrice float64, currency stri
 		return false, fmt.Errorf("committing transaction: %w", err)
 	}
 	return priceChanged, nil
+}
+
+// DeletePrices hard-deletes the given price rows along with their price_history rows
+// in one transaction. Used by the /audit/titles/prune endpoint for cleaning up
+// confidently-wrong store links discovered by the title-similarity audit.
+func (db *DB) DeletePrices(priceIDs []int) (int, error) {
+	if len(priceIDs) == 0 {
+		return 0, nil
+	}
+	tx, err := db.conn.Begin()
+	if err != nil {
+		return 0, fmt.Errorf("beginning transaction: %w", err)
+	}
+	defer tx.Rollback()
+
+	ids := pq.Array(priceIDs)
+	if _, err := tx.Exec(`DELETE FROM price_history WHERE price_id = ANY($1)`, ids); err != nil {
+		return 0, fmt.Errorf("deleting price_history: %w", err)
+	}
+	res, err := tx.Exec(`DELETE FROM prices WHERE id = ANY($1)`, ids)
+	if err != nil {
+		return 0, fmt.Errorf("deleting prices: %w", err)
+	}
+	n, _ := res.RowsAffected()
+	if err := tx.Commit(); err != nil {
+		return 0, fmt.Errorf("committing delete: %w", err)
+	}
+	return int(n), nil
 }
 
 // MarkChecked updates last_checked_at without changing the price.
@@ -195,10 +331,14 @@ func (db *DB) PriceExistsByURL(url string) (bool, error) {
 // creates a price record linking it to the given store. If the price record
 // already exists (product_id, store_id unique constraint), it is skipped.
 // manufacturerCode: when non-empty, set on insert or overwrite on conflict when provided.
-func (db *DB) UpsertProductAndPrice(title, productSlug, category, imageURL string, storeID int, price float64, currency, url, manufacturerCode string) error {
+// storeTitle is the product name as scraped from the store page (may differ from the
+// canonical product title); stored for later title-similarity audits.
+// Returns the product ID and whether the price row was newly created (true on insert,
+// false when ON CONFLICT DO NOTHING kicked in).
+func (db *DB) UpsertProductAndPrice(title, productSlug, category, imageURL string, storeID int, price float64, currency, url, manufacturerCode, storeTitle string) (int, bool, error) {
 	tx, err := db.conn.Begin()
 	if err != nil {
-		return fmt.Errorf("beginning transaction: %w", err)
+		return 0, false, fmt.Errorf("beginning transaction: %w", err)
 	}
 	defer tx.Rollback()
 
@@ -216,20 +356,77 @@ func (db *DB) UpsertProductAndPrice(title, productSlug, category, imageURL strin
 		RETURNING id
 	`, title, productSlug, category, imageURL, manufacturerCode, now).Scan(&productID)
 	if err != nil {
-		return fmt.Errorf("upserting product %s: %w", productSlug, err)
+		return 0, false, fmt.Errorf("upserting product %s: %w", productSlug, err)
 	}
 
 	// Insert price — skip if this product+store pair already exists.
-	_, err = tx.Exec(`
-		INSERT INTO prices (product_id, store_id, current_price, currency, url, is_available, last_checked_at, created_at, updated_at)
-		VALUES ($1, $2, $3, $4, $5, true, $6, $6, $6)
+	res, err := tx.Exec(`
+		INSERT INTO prices (product_id, store_id, current_price, currency, url, store_title, is_available, last_checked_at, created_at, updated_at)
+		VALUES ($1, $2, $3, $4, $5, NULLIF(TRIM($7), ''), true, $6, $6, $6)
 		ON CONFLICT (product_id, store_id) DO NOTHING
-	`, productID, storeID, price, currency, url, now)
+	`, productID, storeID, price, currency, url, now, storeTitle)
 	if err != nil {
-		return fmt.Errorf("inserting price for product %d store %d: %w", productID, storeID, err)
+		return 0, false, fmt.Errorf("inserting price for product %d store %d: %w", productID, storeID, err)
 	}
+	rowsAffected, _ := res.RowsAffected()
 
-	return tx.Commit()
+	if err := tx.Commit(); err != nil {
+		return 0, false, err
+	}
+	return productID, rowsAffected > 0, nil
+}
+
+// ProductLinkInfo holds the data needed to run a per-product link job triggered by a
+// product.created RabbitMQ event.
+type ProductLinkInfo struct {
+	ID               int
+	Title            string
+	ManufacturerCode string
+	SourceSlug       string
+	SourceURL        string
+	SourcePrice      float64
+}
+
+// GetProductForLinkingByID fetches a product together with one of its existing source
+// prices so the link consumer has enough context to score candidates. Returns
+// (nil, nil) when the product has no price rows at all.
+func (db *DB) GetProductForLinkingByID(productID int, preferredSourceSlug string) (*ProductLinkInfo, error) {
+	const q = `
+		SELECT pr.id, pr.title, COALESCE(pr.manufacturer_code, ''),
+		       s.slug, COALESCE(px.url, ''), px.current_price
+		FROM products pr
+		INNER JOIN prices px ON px.product_id = pr.id
+		INNER JOIN stores s  ON s.id = px.store_id AND s.is_active = true
+		WHERE pr.id = $1
+		ORDER BY CASE WHEN s.slug = $2 THEN 0 ELSE 1 END, px.updated_at DESC
+		LIMIT 1
+	`
+	row := db.conn.QueryRow(q, productID, preferredSourceSlug)
+	var info ProductLinkInfo
+	err := row.Scan(&info.ID, &info.Title, &info.ManufacturerCode, &info.SourceSlug, &info.SourceURL, &info.SourcePrice)
+	if err == sql.ErrNoRows {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, fmt.Errorf("loading product %d for linking: %w", productID, err)
+	}
+	return &info, nil
+}
+
+// ProductHasPriceForStore reports whether productID already has a price row in the given store slug.
+func (db *DB) ProductHasPriceForStore(productID int, storeSlug string) (bool, error) {
+	const q = `
+		SELECT EXISTS (
+			SELECT 1 FROM prices p
+			INNER JOIN stores s ON s.id = p.store_id
+			WHERE p.product_id = $1 AND s.slug = $2
+		)
+	`
+	var exists bool
+	if err := db.conn.QueryRow(q, productID, storeSlug).Scan(&exists); err != nil {
+		return false, fmt.Errorf("checking price existence (product=%d store=%s): %w", productID, storeSlug, err)
+	}
+	return exists, nil
 }
 
 // SetProductManufacturerCode sets manufacturer_code when code is non-empty (overwrites existing).
@@ -355,7 +552,9 @@ func (db *DB) ListProductsWithSourceWithoutTargetStore(sourceStoreSlug, targetSt
 
 // UpsertPriceForProduct inserts or updates a price for an existing product and store.
 // When the price value changes on update, a row is appended to price_history.
-func (db *DB) UpsertPriceForProduct(productID, storeID int, newPrice float64, currency, productURL string, isAvailable bool) error {
+// storeTitle is the product name as scraped from the store page; when empty, the existing
+// store_title value (if any) is kept on update.
+func (db *DB) UpsertPriceForProduct(productID, storeID int, newPrice float64, currency, productURL string, isAvailable bool, storeTitle string) error {
 	tx, err := db.conn.Begin()
 	if err != nil {
 		return fmt.Errorf("beginning transaction: %w", err)
@@ -373,9 +572,9 @@ func (db *DB) UpsertPriceForProduct(productID, storeID int, newPrice float64, cu
 
 	if err == sql.ErrNoRows {
 		_, err = tx.Exec(`
-			INSERT INTO prices (product_id, store_id, current_price, currency, url, is_available, last_checked_at, created_at, updated_at)
-			VALUES ($1, $2, $3, $4, $5, $6, $7, $7, $7)
-		`, productID, storeID, newRounded, currency, productURL, isAvailable, now)
+			INSERT INTO prices (product_id, store_id, current_price, currency, url, store_title, is_available, last_checked_at, created_at, updated_at)
+			VALUES ($1, $2, $3, $4, $5, NULLIF(TRIM($8), ''), $6, $7, $7, $7)
+		`, productID, storeID, newRounded, currency, productURL, isAvailable, now, storeTitle)
 		if err != nil {
 			return fmt.Errorf("inserting price for product %d store %d: %w", productID, storeID, err)
 		}
@@ -387,9 +586,15 @@ func (db *DB) UpsertPriceForProduct(productID, storeID int, newPrice float64, cu
 
 	_, err = tx.Exec(`
 		UPDATE prices
-		SET current_price = $1, currency = $2, url = $3, is_available = $4, last_checked_at = $5, updated_at = $5
+		SET current_price = $1,
+		    currency = $2,
+		    url = $3,
+		    is_available = $4,
+		    last_checked_at = $5,
+		    updated_at = $5,
+		    store_title = COALESCE(NULLIF(TRIM($7), ''), store_title)
 		WHERE id = $6
-	`, newRounded, currency, productURL, isAvailable, now, priceID)
+	`, newRounded, currency, productURL, isAvailable, now, priceID, storeTitle)
 	if err != nil {
 		return fmt.Errorf("updating price %d: %w", priceID, err)
 	}

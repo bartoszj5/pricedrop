@@ -205,19 +205,26 @@ func pickBestAmazonHit(productTitle, manufacturerCode string, hits []AmazonSearc
 			pool = filtered
 		}
 	}
+	if len(pool) == 0 {
+		return AmazonSearchHit{}, 0, false
+	}
+
+	candidates := make([]string, len(pool))
+	for i := range pool {
+		candidates[i] = strings.TrimSpace(pool[i].Title)
+	}
+	scores := titleSimilarityScores(productTitle, candidates)
 
 	var top *AmazonSearchHit
 	topScore := 0.0
 	for i := range pool {
-		h := &pool[i]
-		candidate := strings.TrimSpace(h.Title)
-		s := titleTokenJaccard(productTitle, candidate)
-		if code != "" && hitShowsManufacturerCodeAmazon(h, code) && s < 0.50 {
+		s := scores[i]
+		if code != "" && hitShowsManufacturerCodeAmazon(&pool[i], code) && s < 0.50 {
 			s = 0.50
 		}
 		if s > topScore {
 			topScore = s
-			top = h
+			top = &pool[i]
 		}
 	}
 	if top == nil {
