@@ -180,6 +180,7 @@ def _apply_product_filters(
     search: str | None = None,
     category: str | None = None,
     store: str | None = None,
+    main_catalog: bool = False,
 ):
     if search and search.strip():
         for term in search.strip().split():
@@ -210,6 +211,9 @@ def _apply_product_filters(
             )
             .exists()
         )
+
+    if main_catalog:
+        statement = statement.where(Product.category.not_in(FREE_GAME_CATEGORIES))
 
     free_game_ids = (
         select(Price.product_id)
@@ -272,6 +276,7 @@ def list_products_with_prices(
     search: Annotated[str | None, Query(max_length=255)] = None,
     category: Annotated[str | None, Query(max_length=50)] = None,
     store: Annotated[str | None, Query(max_length=100)] = None,
+    main_catalog: bool = False,
     sort: ProductSort = "featured",
     page: Annotated[int, Query(ge=1)] = 1,
     page_size: Annotated[int, Query(ge=1, le=100)] = 20,
@@ -280,6 +285,7 @@ def list_products_with_prices(
         search=search,
         category=category,
         store=store,
+        main_catalog=main_catalog,
         sort=sort,
         page=page,
         page_size=page_size,
@@ -321,27 +327,64 @@ def list_products_with_prices(
         .subquery()
     )
 
+    price_history_stats = (
+        select(
+            Price.product_id.label("product_id"),
+            func.max(PriceHistory.old_price).label("reference_price"),
+        )
+        .join(Price, PriceHistory.price_id == Price.id)
+        .group_by(Price.product_id)
+        .subquery()
+    )
+
     count_query = _apply_product_filters(
         select(func.count()).select_from(Product),
         search=search,
         category=category,
         store=store,
+        main_catalog=main_catalog,
     )
     categories_query = _apply_product_filters(
         select(Product.category).distinct(),
         search=search,
         store=store,
+        main_catalog=main_catalog,
     ).order_by(Product.category.asc())
 
     available_offers_count = func.coalesce(price_stats.c.available_offers_count, 0)
     best_price = ranked_best_prices.c.best_price
     best_price_missing = case((best_price.is_(None), 1), else_=0)
+    reference_price = price_history_stats.c.reference_price
+    discount_ratio = case(
+        (
+            reference_price.is_not(None)
+            & best_price.is_not(None)
+            & (reference_price > best_price),
+            (reference_price - best_price) / reference_price,
+        ),
+        else_=0,
+    )
+    low_value_offer_penalty = case(
+        (best_price.is_(None), 3),
+        (best_price < 20, 2),
+        (best_price < 100, 1),
+        else_=0,
+    )
+    category_priority = case(
+        (Product.category == "console", 0),
+        (Product.category == "laptop", 1),
+        (Product.category == "smartphone", 2),
+        (Product.category == "tv", 3),
+        (Product.category == "headphones", 4),
+        else_=5,
+    )
     # Recreate the filtered product subquery for stable column access in joins.
     filtered_products = _apply_product_filters(
         select(Product.id),
         search=search,
         category=category,
         store=store,
+        main_catalog=main_catalog,
     ).subquery()
     query = (
         select(
@@ -355,6 +398,10 @@ def list_products_with_prices(
         )
         .join(filtered_products, filtered_products.c.id == Product.id)
         .outerjoin(price_stats, price_stats.c.product_id == Product.id)
+        .outerjoin(
+            price_history_stats,
+            price_history_stats.c.product_id == Product.id,
+        )
         .outerjoin(
             ranked_best_prices,
             (ranked_best_prices.c.product_id == Product.id)
@@ -416,9 +463,15 @@ def list_products_with_prices(
     elif sort == "title_asc":
         query = query.order_by(Product.title.asc())
     else:
+        rank_missing = case((Product.popularity_rank.is_(None), 1), else_=0)
         query = query.order_by(
             best_price_missing.asc(),
-            best_price.asc(),
+            discount_ratio.desc(),
+            category_priority.asc(),
+            rank_missing.asc(),
+            Product.popularity_rank.asc(),
+            low_value_offer_penalty.asc(),
+            available_offers_count.desc(),
             Product.updated_at.desc(),
             Product.title.asc(),
         )

@@ -13,7 +13,7 @@ sys.path.insert(0, str(ROOT / "api"))
 
 from main import app  # noqa: E402
 from shared.database import get_session  # noqa: E402
-from shared.models import Price, Product, Store  # noqa: E402
+from shared.models import Price, PriceHistory, Product, Store  # noqa: E402
 
 
 @pytest.fixture()
@@ -54,13 +54,44 @@ def client():
             slug="tracked-only",
             category="game",
         )
-        session.add_all([steam, gog, free_dlc, tracked_only])
+        premium_console = Product(
+            title="PlayStation 5 Slim",
+            slug="playstation-5-slim",
+            category="console",
+            popularity_rank=1,
+        )
+        cheap_accessory = Product(
+            title="Budget Mouse Pad",
+            slug="budget-mouse-pad",
+            category="headphones",
+        )
+        session.add_all(
+            [steam, gog, free_dlc, tracked_only, premium_console, cheap_accessory]
+        )
         session.commit()
         session.refresh(steam)
         session.refresh(gog)
         session.refresh(free_dlc)
         session.refresh(tracked_only)
+        session.refresh(premium_console)
+        session.refresh(cheap_accessory)
 
+        console_price = Price(
+            product_id=premium_console.id,
+            store_id=steam.id,
+            current_price=Decimal("1999.00"),
+            currency="PLN",
+            url="https://example.com/playstation-5-slim-steam",
+            is_available=True,
+        )
+        mouse_pad_price = Price(
+            product_id=cheap_accessory.id,
+            store_id=steam.id,
+            current_price=Decimal("3.90"),
+            currency="PLN",
+            url="https://example.com/budget-mouse-pad-steam",
+            is_available=True,
+        )
         session.add_all(
             [
                 Price(
@@ -87,7 +118,20 @@ def client():
                     url="https://example.com/tracked-only-steam",
                     is_available=False,
                 ),
+                console_price,
+                mouse_pad_price,
             ]
+        )
+        session.commit()
+        session.refresh(console_price)
+        session.add(
+            PriceHistory(
+                price_id=console_price.id,
+                store_id=steam.id,
+                old_price=Decimal("2499.00"),
+                new_price=Decimal("1999.00"),
+                currency="PLN",
+            )
         )
         session.commit()
 
@@ -131,16 +175,20 @@ def test_prices_endpoint_filters_by_availability_and_reports_summary_totals(
     inactive_payload = inactive_response.json()
 
     assert active_payload["availability"] == "active"
-    assert active_payload["total"] == 1
-    assert active_payload["all_total"] == 2
-    assert active_payload["active_total"] == 1
+    assert active_payload["total"] == 3
+    assert active_payload["all_total"] == 4
+    assert active_payload["active_total"] == 3
     assert active_payload["inactive_total"] == 1
-    assert [item["product_slug"] for item in active_payload["items"]] == ["free-dlc"]
+    assert [item["product_slug"] for item in active_payload["items"]] == [
+        "budget-mouse-pad",
+        "free-dlc",
+        "playstation-5-slim",
+    ]
 
     assert inactive_payload["availability"] == "inactive"
     assert inactive_payload["total"] == 1
-    assert inactive_payload["all_total"] == 2
-    assert inactive_payload["active_total"] == 1
+    assert inactive_payload["all_total"] == 4
+    assert inactive_payload["active_total"] == 3
     assert inactive_payload["inactive_total"] == 1
     assert [item["product_slug"] for item in inactive_payload["items"]] == [
         "tracked-only"
@@ -176,3 +224,33 @@ def test_products_with_prices_excludes_free_game_like_products(
     returned_slugs = {item["slug"] for item in payload["items"]}
     assert "free-dlc" not in returned_slugs
     assert payload["total"] == len(payload["items"])
+
+
+def test_products_with_prices_main_catalog_excludes_games_before_pagination(
+    client: TestClient,
+):
+    response = client.get(
+        "/products/with-prices?main_catalog=true&page_size=100&sort=featured"
+    )
+
+    assert response.status_code == 200
+    payload = response.json()
+
+    returned_slugs = [item["slug"] for item in payload["items"]]
+    assert returned_slugs == ["playstation-5-slim", "budget-mouse-pad"]
+    assert payload["total"] == 2
+    assert payload["categories"] == ["console", "headphones"]
+
+
+def test_products_with_prices_featured_prefers_real_deals_over_lowest_price(
+    client: TestClient,
+):
+    response = client.get(
+        "/products/with-prices?main_catalog=true&page_size=100&sort=featured"
+    )
+
+    assert response.status_code == 200
+    payload = response.json()
+
+    assert payload["items"][0]["slug"] == "playstation-5-slim"
+    assert payload["items"][1]["slug"] == "budget-mouse-pad"

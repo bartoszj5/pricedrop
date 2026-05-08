@@ -27,6 +27,7 @@ export default async function Home({ searchParams }: PageProps) {
       search,
       category,
       store,
+      main_catalog: true,
       sort: sort as ProductSort | undefined,
       page,
       page_size: 30,
@@ -38,15 +39,11 @@ export default async function Home({ searchParams }: PageProps) {
     (value) => !isGameLikeCategory(value),
   );
   const items = productsData.items.filter(isMainCatalogVisibleProduct);
+  const usesFeaturedSort = !sort || sort === "featured";
 
   const featured: ProductWithBestPrice | null =
-    page === 1
-      ? items.reduce<ProductWithBestPrice | null>((best, p) => {
-          if (p.best_price == null) return best;
-          if (!best || best.best_price == null || p.best_price < best.best_price)
-            return p;
-          return best;
-        }, null)
+    page === 1 && usesFeaturedSort
+      ? (items[0] ?? null)
       : null;
 
   const restItems = featured

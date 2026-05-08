@@ -102,6 +102,7 @@ export async function getProducts(
     search?: string;
     category?: string;
     store?: string;
+    main_catalog?: boolean;
     sort?: ProductSort;
     page?: number;
     page_size?: number;
@@ -112,6 +113,7 @@ export async function getProducts(
   if (params.search) sp.set("search", params.search);
   if (params.category) sp.set("category", params.category);
   if (params.store) sp.set("store", params.store);
+  if (params.main_catalog) sp.set("main_catalog", "true");
   if (params.sort) sp.set("sort", params.sort);
   if (params.page) sp.set("page", String(params.page));
   if (params.page_size) sp.set("page_size", String(params.page_size));
