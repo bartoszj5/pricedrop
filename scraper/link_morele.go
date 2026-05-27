@@ -30,24 +30,19 @@ func moreleURLStem(raw string) string {
 	if i := strings.LastIndex(path, "/"); i >= 0 {
 		path = path[i+1:]
 	}
-	// Drop trailing -digits (Morele product id).
-	for {
-		h := strings.LastIndex(path, "-")
-		if h < 0 {
-			break
-		}
+	// Drop the final numeric Morele product id, preserving model numbers in the slug.
+	if h := strings.LastIndex(path, "-"); h >= 0 {
 		tail := path[h+1:]
-		allNum := true
+		allNum := tail != ""
 		for _, r := range tail {
 			if r < '0' || r > '9' {
 				allNum = false
 				break
 			}
 		}
-		if !allNum || tail == "" {
-			break
+		if allNum {
+			path = path[:h]
 		}
-		path = path[:h]
 	}
 	path = strings.ReplaceAll(path, "-", " ")
 	return strings.TrimSpace(path)
