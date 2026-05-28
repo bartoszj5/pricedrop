@@ -12,7 +12,7 @@ concurrency:
 
 jobs:
   api:
-    name: API (pytest)
+    name: API & Notifications (pytest)
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -31,7 +31,7 @@ jobs:
           PYTHONPATH: ${{ github.workspace }}
           SECRET_KEY: test-secret-key-for-ci-only
           ENVIRONMENT: test
-        run: pytest api/tests/ -v
+        run: pytest api/tests/ notifications/tests/ -v
 
   scraper:
     name: Scraper (Go build & vet)
