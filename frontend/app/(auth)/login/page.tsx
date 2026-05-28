@@ -35,9 +35,9 @@ export default function LoginPage() {
           <div className="mx-auto mb-4 flex h-14 w-14 items-center justify-center rounded-[20px] border border-border bg-bg-card text-accent shadow-[var(--shadow-card)]">
             <LogIn className="h-7 w-7" />
           </div>
-          <h1 className="display-title text-3xl text-text-primary">Zaloguj sie</h1>
+          <h1 className="display-title text-3xl text-text-primary">Zaloguj się</h1>
           <p className="mt-2 text-sm text-text-muted">
-            Zaloguj sie, aby zarzadzac alertami cenowymi
+            Zaloguj się, aby zarządzać alertami cenowymi
           </p>
         </div>
 
@@ -50,7 +50,7 @@ export default function LoginPage() {
 
           <label className="flex flex-col gap-1.5">
             <span className="text-sm font-semibold text-text-secondary">
-              Nazwa uzytkownika
+              Nazwa użytkownika
             </span>
             <input
               type="text"
@@ -65,7 +65,7 @@ export default function LoginPage() {
 
           <label className="flex flex-col gap-1.5">
             <span className="text-sm font-semibold text-text-secondary">
-              Haslo
+              Hasło
             </span>
             <input
               type="password"
@@ -83,7 +83,7 @@ export default function LoginPage() {
             disabled={submitting}
             className="mt-2 flex items-center justify-center gap-2 rounded-full border border-accent bg-accent px-6 py-3 text-sm font-bold text-white shadow-[var(--shadow-card)] hover:brightness-110 disabled:opacity-60"
           >
-            {submitting ? "Logowanie..." : "Zaloguj sie"}
+            {submitting ? "Logowanie..." : "Zaloguj się"}
           </button>
         </form>
 

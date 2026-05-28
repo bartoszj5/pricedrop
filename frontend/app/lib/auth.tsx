@@ -10,6 +10,7 @@ import {
 } from "react";
 
 export type NotificationChannel = "email" | "discord" | "both";
+export type DeliverySummaryStatus = "sent" | "partial" | "failed" | "skipped";
 
 export interface AuthUser {
   id: number;
@@ -28,6 +29,7 @@ export interface AlertInfo {
   is_active: boolean;
   triggered_at: string | null;
   created_at: string;
+  last_delivery_status: DeliverySummaryStatus | null;
 }
 
 interface RawAlertResponse {
@@ -38,6 +40,7 @@ interface RawAlertResponse {
   is_active: boolean;
   triggered_at: string | null;
   created_at: string;
+  last_delivery_status: DeliverySummaryStatus | null;
 }
 
 function parseAlert(raw: RawAlertResponse): AlertInfo {

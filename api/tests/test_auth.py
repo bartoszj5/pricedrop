@@ -13,7 +13,7 @@ import pytest  # noqa: E402
 
 from main import app  # noqa: E402
 from shared.database import get_session  # noqa: E402
-from shared.models import Product  # noqa: E402
+from shared.models import Alert, NotificationDelivery, Product, User  # noqa: E402
 
 STRONG_PASSWORD = "Zq7-mLp9#XvT2kRn4"
 
@@ -80,6 +80,32 @@ def raw_client():
 
     with TestClient(app) as test_client:
         yield test_client
+
+    app.dependency_overrides.clear()
+
+
+@pytest.fixture()
+def client_and_engine():
+    engine = create_engine(
+        "sqlite://",
+        connect_args={"check_same_thread": False},
+        poolclass=StaticPool,
+    )
+    SQLModel.metadata.create_all(engine)
+
+    def override_get_session():
+        with Session(engine) as session:
+            yield session
+
+    app.dependency_overrides[get_session] = override_get_session
+
+    with Session(engine) as session:
+        product = Product(title="Test Product", slug="test-product", category="game")
+        session.add(product)
+        session.commit()
+
+    with CSRFTestClient(app) as test_client:
+        yield test_client, engine
 
     app.dependency_overrides.clear()
 
@@ -251,6 +277,127 @@ def test_update_me_settings_rejects_invalid_webhook_url(client: TestClient):
         json={"discord_webhook_url": "https://example.com/not-a-discord-webhook"},
     )
     assert resp.status_code == 422
+
+
+def test_notification_status_reports_missing_service_config(
+    client: TestClient,
+    monkeypatch: pytest.MonkeyPatch,
+):
+    monkeypatch.delenv("INTERNAL_API_TOKEN", raising=False)
+    headers = _auth_header(client)
+
+    resp = client.get("/notifications/status", headers=headers)
+
+    assert resp.status_code == 200
+    payload = resp.json()
+    assert payload["service_available"] is False
+    assert payload["effective_channels"] == []
+    assert {warning["code"] for warning in payload["warnings"]} == {
+        "notifications_unavailable",
+        "discord_webhook_missing",
+        "email_not_configured",
+    }
+
+
+def test_notification_test_uses_current_user_preferences(
+    client: TestClient,
+    monkeypatch: pytest.MonkeyPatch,
+):
+    monkeypatch.setenv("INTERNAL_API_TOKEN", "secret")
+    headers = _auth_header(client)
+    webhook = "https://discord.com/api/webhooks/123/token"
+    client.patch(
+        "/auth/me/settings",
+        headers=headers,
+        json={"discord_webhook_url": webhook, "notification_channel": "discord"},
+    )
+    calls: list[dict] = []
+
+    class FakeResponse:
+        def raise_for_status(self):
+            return None
+
+        def json(self):
+            return {
+                "status": "sent",
+                "deliveries": [
+                    {
+                        "channel": "discord",
+                        "status": "sent",
+                        "reason": None,
+                        "error_message": None,
+                    }
+                ],
+            }
+
+    class FakeAsyncClient:
+        def __init__(self, *args, **kwargs):
+            return None
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, exc_type, exc, tb):
+            return False
+
+        async def post(self, url, *, headers, json):
+            calls.append({"url": url, "headers": headers, "json": json})
+            return FakeResponse()
+
+    import routers.notifications as notification_router
+
+    monkeypatch.setattr(notification_router.httpx, "AsyncClient", FakeAsyncClient)
+
+    resp = client.post("/notifications/test", headers=headers)
+
+    assert resp.status_code == 200
+    assert resp.json()["status"] == "sent"
+    assert calls[0]["headers"]["X-Internal-Token"] == "secret"
+    assert calls[0]["json"]["discord_webhook_url"] == webhook
+    assert calls[0]["json"]["notification_channel"] == "discord"
+
+
+def test_notification_history_is_scoped_to_current_user(client_and_engine):
+    client, engine = client_and_engine
+    headers = _auth_header(client)
+    me = client.get("/auth/me", headers=headers).json()
+
+    with Session(engine) as session:
+        other_user = User(
+            email="other@example.com",
+            username="other",
+            hashed_password="hashed-password",
+        )
+        session.add(other_user)
+        session.commit()
+        session.refresh(other_user)
+        session.add(
+            NotificationDelivery(
+                delivery_group_id="group-current",
+                user_id=me["id"],
+                event_type="test",
+                channel="email",
+                status="skipped",
+                reason="email_not_configured",
+            )
+        )
+        session.add(
+            NotificationDelivery(
+                delivery_group_id="group-other",
+                user_id=other_user.id,
+                event_type="test",
+                channel="discord",
+                status="sent",
+            )
+        )
+        session.commit()
+
+    resp = client.get("/notifications/history", headers=headers)
+
+    assert resp.status_code == 200
+    payload = resp.json()
+    assert len(payload) == 1
+    assert payload[0]["delivery_group_id"] == "group-current"
 
 
 def test_me_requires_auth(client: TestClient):
@@ -440,6 +587,51 @@ def test_create_and_list_alerts(client: TestClient):
     assert resp.status_code == 200
     assert len(resp.json()) == 1
     assert resp.json()[0]["id"] == alert_id
+
+
+def test_alert_list_includes_latest_delivery_status(client_and_engine):
+    client, engine = client_and_engine
+    headers = _auth_header(client)
+    created = client.post(
+        "/alerts/",
+        json={"product_id": 1, "target_price": "49.99"},
+        headers=headers,
+    )
+    alert_id = created.json()["id"]
+    user_id = client.get("/auth/me", headers=headers).json()["id"]
+
+    with Session(engine) as session:
+        alert = session.get(Alert, alert_id)
+        assert alert is not None
+        session.add_all(
+            [
+                NotificationDelivery(
+                    delivery_group_id="latest-group",
+                    user_id=user_id,
+                    alert_id=alert.id,
+                    product_id=alert.product_id,
+                    event_type="price_drop",
+                    channel="discord",
+                    status="failed",
+                    reason="delivery_failed",
+                ),
+                NotificationDelivery(
+                    delivery_group_id="latest-group",
+                    user_id=user_id,
+                    alert_id=alert.id,
+                    product_id=alert.product_id,
+                    event_type="price_drop",
+                    channel="email",
+                    status="sent",
+                ),
+            ]
+        )
+        session.commit()
+
+    resp = client.get("/alerts/", headers=headers)
+
+    assert resp.status_code == 200
+    assert resp.json()[0]["last_delivery_status"] == "partial"
 
 
 def test_create_alert_duplicate_rejected(client: TestClient):

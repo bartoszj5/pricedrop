@@ -107,7 +107,8 @@ All configuration is environment-based. Copy `.env.example` to `.env` and set va
 | `ENVIRONMENT` | api | `development` or `production`. |
 | `CORS_ORIGINS` | api | Comma-separated origins allowed by CORS. |
 | `COOKIE_SECURE` | api | Force `Secure` flag on auth cookie. |
-| `INTERNAL_API_TOKEN` | api, scraper, frontend | Shared bearer token for internal endpoints (cache invalidation, scraper triggers). |
+| `INTERNAL_API_TOKEN` | api, scraper, notifications, frontend | Shared bearer token for internal endpoints (cache invalidation, scraper triggers, notification tests). |
+| `NOTIFICATIONS_INTERNAL_URL` | api | Internal URL used by the API to reach the notifications service. |
 | `CACHE_DEFAULT_TTL_SECONDS` | api | Default Redis cache TTL (default `300`). |
 | `ITAD_API_KEY` | api | IsThereAnyDeal API key; disables sync if empty. |
 | `ITAD_SYNC_INTERVAL` / `ITAD_POPULAR_LIMIT` / `ITAD_SYNC_COUNTRY` | api | ITAD sync tuning. |

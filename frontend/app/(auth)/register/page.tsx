@@ -21,11 +21,11 @@ export default function RegisterPage() {
     setError(null);
 
     if (username.length < 3 || username.length > 100) {
-      setError("Nazwa uzytkownika musi miec od 3 do 100 znakow");
+      setError("Nazwa użytkownika musi mieć od 3 do 100 znaków");
       return;
     }
     if (!/^[a-zA-Z0-9_-]+$/.test(username)) {
-      setError("Nazwa uzytkownika moze zawierac tylko litery, cyfry, myslniki i podkreslenia");
+      setError("Nazwa użytkownika może zawierać tylko litery, cyfry, myślniki i podkreślenia");
       return;
     }
     if (password !== confirmPassword) {
@@ -33,7 +33,7 @@ export default function RegisterPage() {
       return;
     }
     if (password.length < 8) {
-      setError("Haslo musi miec co najmniej 8 znakow");
+      setError("Hasło musi mieć co najmniej 8 znaków");
       return;
     }
 
@@ -70,7 +70,7 @@ export default function RegisterPage() {
 
           <label className="flex flex-col gap-1.5">
             <span className="text-sm font-semibold text-text-secondary">
-              Nazwa uzytkownika
+              Nazwa użytkownika
             </span>
             <input
               type="text"
@@ -103,7 +103,7 @@ export default function RegisterPage() {
 
           <label className="flex flex-col gap-1.5">
             <span className="text-sm font-semibold text-text-secondary">
-              Haslo
+              Hasło
             </span>
             <input
               type="password"
@@ -146,7 +146,7 @@ export default function RegisterPage() {
             href="/login"
             className="font-semibold text-accent hover:underline"
           >
-            Zaloguj sie
+            Zaloguj się
           </Link>
         </p>
       </div>

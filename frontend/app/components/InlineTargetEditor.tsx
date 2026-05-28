@@ -3,7 +3,7 @@
 import { BellRing, Check, Pencil, Target, Trash2, X } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 
-import { useAuth } from "../lib/auth";
+import { useAuth, type DeliverySummaryStatus } from "../lib/auth";
 import { formatPrice } from "../lib/utils";
 
 interface InlineTargetEditorProps {
@@ -11,6 +11,23 @@ interface InlineTargetEditorProps {
   bestPrice: number | null;
   currency?: string;
   onUnlike?: () => Promise<void> | void;
+}
+
+const DELIVERY_STATUS_COPY: Record<DeliverySummaryStatus, string> = {
+  sent: "Wysłane",
+  partial: "Częściowo",
+  failed: "Błąd",
+  skipped: "Pominięte",
+};
+
+function deliveryStatusClass(status: DeliverySummaryStatus): string {
+  if (status === "sent") {
+    return "border-accent-green/40 bg-accent-green-soft text-accent-green";
+  }
+  if (status === "failed") {
+    return "border-accent-red/40 bg-accent-red/8 text-accent-red";
+  }
+  return "border-accent-amber/40 bg-[var(--warning-surface)] text-accent-amber";
 }
 
 export default function InlineTargetEditor({
@@ -131,6 +148,17 @@ export default function InlineTargetEditor({
           </button>
         )}
       </div>
+
+      {alert?.last_delivery_status && (
+        <div
+          className={`inline-flex w-fit items-center gap-1 rounded-full border px-2 py-0.5 text-[0.65rem] font-semibold ${deliveryStatusClass(
+            alert.last_delivery_status,
+          )}`}
+        >
+          <BellRing className="h-3 w-3" />
+          Ostatni alert: {DELIVERY_STATUS_COPY[alert.last_delivery_status]}
+        </div>
+      )}
 
       {editing && (
         <div className="flex items-center gap-1.5">

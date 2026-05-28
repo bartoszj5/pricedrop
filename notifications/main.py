@@ -1,7 +1,9 @@
 import asyncio
+import hmac
 import json
 import logging
 import os
+import uuid
 from contextlib import asynccontextmanager, suppress
 from dataclasses import dataclass
 from datetime import datetime, timezone
@@ -12,11 +14,12 @@ from typing import Any
 import aio_pika
 import aiosmtplib
 import httpx
-from fastapi import FastAPI
+from fastapi import Depends, FastAPI, Header, HTTPException, status
+from pydantic import BaseModel
 from sqlmodel import Session, select
 
 from shared.database import get_engine
-from shared.models import Alert, User
+from shared.models import Alert, NotificationDelivery, User
 
 logging.basicConfig(
     level=os.getenv("LOG_LEVEL", "INFO").upper(),
@@ -48,6 +51,15 @@ def _read_bool_env(name: str, default: bool) -> bool:
 
 SMTP_USE_TLS = _read_bool_env("SMTP_USE_TLS", False)
 SMTP_STARTTLS = _read_bool_env("SMTP_STARTTLS", not SMTP_USE_TLS)
+INTERNAL_API_TOKEN = os.getenv("INTERNAL_API_TOKEN", "")
+
+EVENT_PRICE_DROP = "price_drop"
+EVENT_TEST = "test"
+CHANNEL_EMAIL = "email"
+CHANNEL_DISCORD = "discord"
+STATUS_SENT = "sent"
+STATUS_FAILED = "failed"
+STATUS_SKIPPED = "skipped"
 
 CONSUMER_STATE: dict[str, str | bool | None] = {
     "running": False,
@@ -67,12 +79,27 @@ class PriceDroppedEvent:
 
 @dataclass(slots=True)
 class _AlertMatch:
-    alert_id: int
+    alert_id: int | None
     target_price: Decimal | None
     user_id: int
     user_email: str
     user_webhook_url: str | None
     user_notification_channel: str
+
+
+@dataclass(slots=True)
+class DeliveryAttempt:
+    channel: str
+    status: str
+    reason: str | None = None
+    error_message: str | None = None
+
+
+class InternalTestNotificationRequest(BaseModel):
+    user_id: int
+    email: str
+    discord_webhook_url: str | None = None
+    notification_channel: str = "both"
 
 
 def _to_decimal(value: Any) -> Decimal:
@@ -112,13 +139,103 @@ def _smtp_configured() -> bool:
     return bool(SMTP_HOST and SMTP_FROM)
 
 
+def _aggregate_attempt_status(attempts: list[DeliveryAttempt]) -> str:
+    if not attempts:
+        return STATUS_SKIPPED
+    statuses = {attempt.status for attempt in attempts}
+    if statuses == {STATUS_SENT}:
+        return STATUS_SENT
+    if STATUS_SENT in statuses:
+        return "partial"
+    if STATUS_FAILED in statuses:
+        return STATUS_FAILED
+    return STATUS_SKIPPED
+
+
+def _safe_delivery_error(channel: str, exc: Exception) -> str:
+    if channel == CHANNEL_DISCORD and isinstance(exc, httpx.HTTPStatusError):
+        return f"Discord webhook returned HTTP {exc.response.status_code}"
+    if channel == CHANNEL_DISCORD:
+        return "Discord webhook request failed"
+    return f"Email send failed: {type(exc).__name__}"
+
+
+def _selected_channels(channel: str) -> list[str]:
+    if channel == CHANNEL_EMAIL:
+        return [CHANNEL_EMAIL]
+    if channel == CHANNEL_DISCORD:
+        return [CHANNEL_DISCORD]
+    return [CHANNEL_DISCORD, CHANNEL_EMAIL]
+
+
+def _delivery_row(
+    match: _AlertMatch,
+    event: PriceDroppedEvent,
+    attempt: DeliveryAttempt,
+    *,
+    delivery_group_id: str,
+    event_type: str,
+    created_at: datetime,
+) -> NotificationDelivery:
+    return NotificationDelivery(
+        delivery_group_id=delivery_group_id,
+        user_id=match.user_id,
+        alert_id=match.alert_id,
+        product_id=event.product_id if event.product_id > 0 else None,
+        event_type=event_type,
+        channel=attempt.channel,
+        status=attempt.status,
+        reason=attempt.reason,
+        error_message=attempt.error_message,
+        product_title=event.product_title,
+        store=event.store,
+        old_price=event.old_price,
+        new_price=event.new_price,
+        target_price=match.target_price,
+        currency="PLN",
+        product_url=event.url or None,
+        created_at=created_at,
+    )
+
+
+def _persist_delivery_attempts(
+    match: _AlertMatch,
+    event: PriceDroppedEvent,
+    attempts: list[DeliveryAttempt],
+    *,
+    event_type: str,
+) -> list[NotificationDelivery]:
+    if not attempts:
+        return []
+    engine = get_engine()
+    delivery_group_id = str(uuid.uuid4())
+    created_at = datetime.now(timezone.utc)
+    deliveries = [
+        _delivery_row(
+            match,
+            event,
+            attempt,
+            delivery_group_id=delivery_group_id,
+            event_type=event_type,
+            created_at=created_at,
+        )
+        for attempt in attempts
+    ]
+    with Session(engine) as session:
+        session.add_all(deliveries)
+        session.commit()
+        for delivery in deliveries:
+            session.refresh(delivery)
+    return deliveries
+
+
 async def _send_email_notification(
     recipient_email: str,
     event: PriceDroppedEvent,
     target_price: Decimal | None,
-) -> bool:
+) -> tuple[bool, str | None]:
     if not _smtp_configured():
-        return False
+        return False, "Email channel is not configured"
 
     message = EmailMessage()
     message["From"] = SMTP_FROM
@@ -162,17 +279,17 @@ async def _send_email_notification(
             use_tls=SMTP_USE_TLS,
             timeout=20,
         )
-        return True
-    except Exception:
+        return True, None
+    except Exception as exc:
         logger.exception("Failed to send email notification to %s", recipient_email)
-        return False
+        return False, _safe_delivery_error(CHANNEL_EMAIL, exc)
 
 
 async def _send_discord_notification(
     webhook_url: str,
     event: PriceDroppedEvent,
     target_price: Decimal | None,
-) -> bool:
+) -> tuple[bool, str | None]:
     target_line = (
         f"Target: **{_format_price(target_price)} PLN**"
         if target_price is not None
@@ -195,41 +312,77 @@ async def _send_discord_notification(
         async with httpx.AsyncClient(timeout=10.0) as client:
             response = await client.post(webhook_url, json=payload)
             response.raise_for_status()
-        return True
-    except Exception:
+        return True, None
+    except Exception as exc:
         logger.exception("Failed to send Discord notification")
-        return False
+        return False, _safe_delivery_error(CHANNEL_DISCORD, exc)
 
 
 async def _notify_user(
     match: _AlertMatch,
     event: PriceDroppedEvent,
-) -> bool:
+) -> list[DeliveryAttempt]:
     channel = match.user_notification_channel or "both"
     webhook_url = (match.user_webhook_url or "").strip()
 
-    wants_discord = channel in {"discord", "both"} and bool(webhook_url)
-    wants_email = channel in {"email", "both"} and _smtp_configured()
+    attempts: list[DeliveryAttempt] = []
+    for selected_channel in _selected_channels(channel):
+        if selected_channel == CHANNEL_DISCORD:
+            if not webhook_url:
+                attempts.append(
+                    DeliveryAttempt(
+                        channel=CHANNEL_DISCORD,
+                        status=STATUS_SKIPPED,
+                        reason="discord_webhook_missing",
+                    )
+                )
+                continue
+            delivered, error_message = await _send_discord_notification(
+                webhook_url,
+                event,
+                match.target_price,
+            )
+            attempts.append(
+                DeliveryAttempt(
+                    channel=CHANNEL_DISCORD,
+                    status=STATUS_SENT if delivered else STATUS_FAILED,
+                    reason=None if delivered else "delivery_failed",
+                    error_message=error_message,
+                )
+            )
+            continue
 
-    delivery_results: list[bool] = []
-    if wants_discord:
-        delivery_results.append(
-            await _send_discord_notification(webhook_url, event, match.target_price)
+        if not _smtp_configured():
+            attempts.append(
+                DeliveryAttempt(
+                    channel=CHANNEL_EMAIL,
+                    status=STATUS_SKIPPED,
+                    reason="email_not_configured",
+                )
+            )
+            continue
+        delivered, error_message = await _send_email_notification(
+            match.user_email,
+            event,
+            match.target_price,
         )
-    if wants_email:
-        delivery_results.append(
-            await _send_email_notification(match.user_email, event, match.target_price)
+        attempts.append(
+            DeliveryAttempt(
+                channel=CHANNEL_EMAIL,
+                status=STATUS_SENT if delivered else STATUS_FAILED,
+                reason=None if delivered else "delivery_failed",
+                error_message=error_message,
+            )
         )
 
-    if not delivery_results:
+    if not any(attempt.status == STATUS_SENT for attempt in attempts):
         logger.warning(
             "No notification channel available for user_id=%s (channel=%s, alert target reached)",
             match.user_id,
             channel,
         )
-        return False
 
-    return any(delivery_results)
+    return attempts
 
 
 async def _process_price_drop_event(event: PriceDroppedEvent) -> tuple[int, int, int]:
@@ -265,8 +418,10 @@ async def _process_price_drop_event(event: PriceDroppedEvent) -> tuple[int, int,
     delivered_ids: list[int] = []
     failed_count = 0
     for match in matches:
-        sent = await _notify_user(match, event)
-        if sent:
+        attempts = await _notify_user(match, event)
+        _persist_delivery_attempts(match, event, attempts, event_type=EVENT_PRICE_DROP)
+        sent = any(attempt.status == STATUS_SENT for attempt in attempts)
+        if sent and match.alert_id is not None:
             delivered_ids.append(match.alert_id)
         else:
             failed_count += 1
@@ -372,6 +527,75 @@ async def lifespan(_app: FastAPI):
 
 
 app = FastAPI(title="PriceDrop Notifications", lifespan=lifespan)
+
+
+def require_internal_token(
+    x_internal_token: str | None = Header(default=None, alias="X-Internal-Token"),
+) -> None:
+    if not INTERNAL_API_TOKEN:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="notifications internal api disabled: INTERNAL_API_TOKEN not set",
+        )
+    if not x_internal_token or not hmac.compare_digest(
+        x_internal_token,
+        INTERNAL_API_TOKEN,
+    ):
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="invalid internal token",
+        )
+
+
+def _attempt_payload(attempt: DeliveryAttempt) -> dict[str, str | None]:
+    return {
+        "channel": attempt.channel,
+        "status": attempt.status,
+        "reason": attempt.reason,
+        "error_message": attempt.error_message,
+    }
+
+
+@app.get(
+    "/internal/notification-config",
+    dependencies=[Depends(require_internal_token)],
+)
+def notification_config():
+    return {
+        "service_available": True,
+        "email_configured": _smtp_configured(),
+        "consumer_running": CONSUMER_STATE["running"],
+        "consumer_last_error": CONSUMER_STATE["last_error"],
+    }
+
+
+@app.post(
+    "/internal/test-notification",
+    dependencies=[Depends(require_internal_token)],
+)
+async def test_notification(data: InternalTestNotificationRequest):
+    event = PriceDroppedEvent(
+        product_id=0,
+        product_title="Powiadomienie testowe PriceDrop",
+        store="PriceDrop",
+        old_price=Decimal("0.00"),
+        new_price=Decimal("0.00"),
+        url="",
+    )
+    match = _AlertMatch(
+        alert_id=None,
+        target_price=None,
+        user_id=data.user_id,
+        user_email=data.email,
+        user_webhook_url=data.discord_webhook_url,
+        user_notification_channel=data.notification_channel,
+    )
+    attempts = await _notify_user(match, event)
+    _persist_delivery_attempts(match, event, attempts, event_type=EVENT_TEST)
+    return {
+        "status": _aggregate_attempt_status(attempts),
+        "deliveries": [_attempt_payload(attempt) for attempt in attempts],
+    }
 
 
 @app.get("/health")

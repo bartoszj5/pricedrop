@@ -22,7 +22,7 @@ sys.modules.setdefault(
 sys.modules.setdefault("aiosmtplib", types.SimpleNamespace(send=None))
 
 import notifications.main as notifications  # noqa: E402
-from shared.models import Alert, Product, User  # noqa: E402
+from shared.models import Alert, NotificationDelivery, Product, User  # noqa: E402
 
 
 @pytest.fixture()
@@ -117,8 +117,13 @@ def test_process_price_drop_deactivates_threshold_alert_but_keeps_watchlist_acti
     async def send_success(
         match: notifications._AlertMatch,
         event: notifications.PriceDroppedEvent,
-    ) -> bool:
-        return True
+    ) -> list[notifications.DeliveryAttempt]:
+        return [
+            notifications.DeliveryAttempt(
+                channel=notifications.CHANNEL_DISCORD,
+                status=notifications.STATUS_SENT,
+            )
+        ]
 
     monkeypatch.setattr(notifications, "_notify_user", send_success)
 
@@ -129,11 +134,11 @@ def test_process_price_drop_deactivates_threshold_alert_but_keeps_watchlist_acti
         alerts = _alerts_by_id(session)
         threshold = alerts[threshold_alert_id]
         watchlist = alerts[watchlist_alert_id]
-
-    assert threshold.triggered_at is not None
-    assert threshold.is_active is False
-    assert watchlist.triggered_at is not None
-    assert watchlist.is_active is True
+        assert threshold.triggered_at is not None
+        assert threshold.is_active is False
+        assert watchlist.triggered_at is not None
+        assert watchlist.is_active is True
+        assert session.exec(select(NotificationDelivery)).all()
 
 
 def test_process_price_drop_without_available_channel_keeps_alert_untriggered(
@@ -168,10 +173,14 @@ def test_process_price_drop_without_available_channel_keeps_alert_untriggered(
     assert result == (1, 0, 1)
     with Session(engine) as session:
         alert = session.get(Alert, alert_id)
-
-    assert alert is not None
-    assert alert.triggered_at is None
-    assert alert.is_active is True
+        assert alert is not None
+        assert alert.triggered_at is None
+        assert alert.is_active is True
+        deliveries = session.exec(select(NotificationDelivery)).all()
+        assert len(deliveries) == 1
+        assert deliveries[0].channel == notifications.CHANNEL_EMAIL
+        assert deliveries[0].status == notifications.STATUS_SKIPPED
+        assert deliveries[0].reason == "email_not_configured"
 
 
 def test_notify_user_treats_partial_discord_email_failure_as_success(
@@ -185,17 +194,17 @@ def test_notify_user_treats_partial_discord_email_failure_as_success(
         webhook_url: str,
         event: notifications.PriceDroppedEvent,
         target_price: Decimal | None,
-    ) -> bool:
+    ) -> tuple[bool, str | None]:
         calls.append(f"discord:{webhook_url}")
-        return False
+        return False, "Discord webhook request failed"
 
     async def email_succeeds(
         recipient_email: str,
         event: notifications.PriceDroppedEvent,
         target_price: Decimal | None,
-    ) -> bool:
+    ) -> tuple[bool, str | None]:
         calls.append(f"email:{recipient_email}")
-        return True
+        return True, None
 
     monkeypatch.setattr(notifications, "_send_discord_notification", discord_fails)
     monkeypatch.setattr(notifications, "_send_email_notification", email_succeeds)
@@ -209,9 +218,13 @@ def test_notify_user_treats_partial_discord_email_failure_as_success(
         user_notification_channel="both",
     )
 
-    delivered = asyncio.run(notifications._notify_user(match, _event()))
+    attempts = asyncio.run(notifications._notify_user(match, _event()))
 
-    assert delivered is True
+    assert notifications._aggregate_attempt_status(attempts) == "partial"
+    assert [attempt.status for attempt in attempts] == [
+        notifications.STATUS_FAILED,
+        notifications.STATUS_SENT,
+    ]
     assert calls == [
         "discord:https://discord.com/api/webhooks/123/token",
         "email:buyer@example.com",

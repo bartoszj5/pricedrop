@@ -48,7 +48,7 @@ export default function LikesPage() {
       setItems(data);
     } catch (err) {
       setError(
-        err instanceof Error ? err.message : "Nie udalo sie pobrac ulubionych",
+        err instanceof Error ? err.message : "Nie udało się pobrać ulubionych",
       );
       setItems([]);
     } finally {
@@ -131,7 +131,7 @@ export default function LikesPage() {
     return (
       <main className="page-shell flex flex-col gap-6">
         <section className="section-subtle p-8 text-sm text-text-muted">
-          Ladowanie ulubionych produktow...
+          Ładowanie ulubionych produktów...
         </section>
       </main>
     );
@@ -145,12 +145,12 @@ export default function LikesPage() {
             <LogIn className="h-7 w-7" />
           </div>
           <h1 className="display-title text-3xl text-text-primary">Ulubione produkty</h1>
-          <p className="text-sm text-text-muted">Zaloguj sie, aby zobaczyc swoja liste polubionych produktow.</p>
+          <p className="text-sm text-text-muted">Zaloguj się, aby zobaczyć swoją listę polubionych produktów.</p>
           <Link
             href="/login"
             className="rounded-full border border-accent bg-accent px-6 py-3 text-sm font-bold text-white shadow-[var(--shadow-card)] hover:brightness-110"
           >
-            Przejdz do logowania
+            Przejdź do logowania
           </Link>
         </section>
       </main>
@@ -247,10 +247,10 @@ export default function LikesPage() {
 
       {items.length === 0 ? (
         <EmptyState
-          message="Nie masz jeszcze ulubionych produktow"
-          detail="Polub dowolny produkt ikona serca, aby pojawil sie tutaj i dostawac powiadomienia o spadkach ceny."
+          message="Nie masz jeszcze ulubionych produktów"
+          detail="Polub dowolny produkt ikoną serca, aby pojawił się tutaj i dostawać powiadomienia o spadkach ceny."
           actionHref="/"
-          actionLabel="Przegladaj katalog"
+          actionLabel="Przeglądaj katalog"
         />
       ) : visibleItems.length === 0 ? (
         <EmptyState

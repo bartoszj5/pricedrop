@@ -12,7 +12,18 @@ from slowapi.middleware import SlowAPIMiddleware
 from csrf import CSRFMiddleware
 from itad_scheduler import itad_sync_loop
 from rate_limit import limiter
-from routers import alerts, auth, dedup, internal, itad, likes, prices, products, stores
+from routers import (
+    alerts,
+    auth,
+    dedup,
+    internal,
+    itad,
+    likes,
+    notifications,
+    prices,
+    products,
+    stores,
+)
 
 logging.basicConfig(
     level=os.getenv("LOG_LEVEL", "INFO").upper(),
@@ -69,6 +80,7 @@ app.include_router(prices.router)
 app.include_router(itad.router)
 app.include_router(alerts.router)
 app.include_router(likes.router)
+app.include_router(notifications.router)
 app.include_router(internal.router)
 
 

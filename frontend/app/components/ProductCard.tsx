@@ -77,7 +77,7 @@ export default function ProductCard({
             await toggleLike(product.id);
           } catch (error) {
             setLikeError(
-              error instanceof Error ? error.message : "Nie udalo sie zapisac ulubionych",
+              error instanceof Error ? error.message : "Nie udało się zapisać ulubionych",
             );
           } finally {
             setLikePending(false);
