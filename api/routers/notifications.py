@@ -135,7 +135,7 @@ def _status_from_config(
         warnings.append(
             NotificationStatusWarning(
                 code="email_not_configured",
-                message="Email jest wybrany, ale SMTP nie jest skonfigurowany.",
+                message="Email jest wybrany, ale powiadomienia email są chwilowo niedostępne.",
             )
         )
     return NotificationStatusResponse(

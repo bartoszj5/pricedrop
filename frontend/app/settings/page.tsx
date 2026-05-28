@@ -97,7 +97,7 @@ const STATUS_COPY: Record<DeliveryStatus, string> = {
 
 const REASON_COPY: Record<string, string> = {
   discord_webhook_missing: "Brak webhooka Discord.",
-  email_not_configured: "SMTP nie jest skonfigurowane.",
+  email_not_configured: "Powiadomienia email są chwilowo niedostępne.",
   delivery_failed: "Kanał zwrócił błąd.",
 };
 
@@ -281,26 +281,14 @@ export default function SettingsPage() {
   return (
     <main className="page-shell flex flex-col gap-6">
       <section className="section-card p-6 sm:p-8">
-        <div className="flex flex-wrap items-start justify-between gap-4">
-          <div>
-            <span className="eyebrow">Panel użytkownika</span>
-            <h1 className="display-title mt-2 text-4xl text-text-primary">
-              Powiadomienia
-            </h1>
-            <p className="mt-2 max-w-2xl text-sm text-text-secondary">
-              Kanał, test wysyłki i historia prób dla alertów cenowych.
-            </p>
-          </div>
-          <div className="flex flex-wrap gap-2">
-            <div className="paper-chip">
-              <Mail className="h-4 w-4" />
-              {notificationStatus?.email_configured ? "SMTP aktywne" : "SMTP brak"}
-            </div>
-            <div className="paper-chip">
-              <MessageSquare className="h-4 w-4" />
-              {notificationStatus?.discord_configured ? "Webhook OK" : "Webhook brak"}
-            </div>
-          </div>
+        <div>
+          <span className="eyebrow">Panel użytkownika</span>
+          <h1 className="display-title mt-2 text-4xl text-text-primary">
+            Powiadomienia
+          </h1>
+          <p className="mt-2 max-w-2xl text-sm text-text-secondary">
+            Kanał, test wysyłki i historia prób dla alertów cenowych.
+          </p>
         </div>
       </section>
 
