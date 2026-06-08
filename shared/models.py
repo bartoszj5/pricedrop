@@ -139,3 +139,32 @@ class Alert(SQLModel, table=True):
 
     user: User = Relationship(back_populates="alerts")
     product: Product = Relationship(back_populates="alerts")
+
+
+# --- NotificationDelivery ---
+
+
+class NotificationDelivery(SQLModel, table=True):
+    __tablename__ = "notification_deliveries"
+
+    id: int | None = Field(default=None, primary_key=True)
+    delivery_group_id: str = Field(max_length=36, index=True)
+    user_id: int = Field(foreign_key="users.id", index=True)
+    alert_id: int | None = Field(default=None, foreign_key="alerts.id", index=True)
+    product_id: int | None = Field(default=None, foreign_key="products.id", index=True)
+    event_type: str = Field(max_length=32, index=True)
+    channel: str = Field(max_length=16, index=True)
+    status: str = Field(max_length=16, index=True)
+    reason: str | None = Field(default=None, max_length=64)
+    error_message: str | None = Field(default=None, max_length=512)
+    product_title: str | None = Field(default=None, max_length=255)
+    store: str | None = Field(default=None, max_length=100)
+    old_price: Decimal | None = Field(default=None, max_digits=10, decimal_places=2)
+    new_price: Decimal | None = Field(default=None, max_digits=10, decimal_places=2)
+    target_price: Decimal | None = Field(default=None, max_digits=10, decimal_places=2)
+    currency: str = Field(default="PLN", max_length=3)
+    product_url: str | None = Field(default=None, max_length=512)
+    created_at: datetime = Field(
+        default_factory=lambda: datetime.now(timezone.utc),
+        index=True,
+    )

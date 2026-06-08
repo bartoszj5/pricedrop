@@ -119,7 +119,7 @@ export default function Navbar() {
                         className="flex items-center gap-2 px-4 py-3 text-sm font-semibold text-text-secondary hover:bg-bg-tertiary hover:text-text-primary"
                       >
                         <LogIn className="h-4 w-4" />
-                        Zaloguj sie
+                        Zaloguj się
                       </Link>
                       <Link
                         href="/register"

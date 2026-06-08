@@ -8,7 +8,7 @@ from sqlmodel import Session, select
 
 from dependencies.auth import get_current_active_user
 from shared.database import get_session
-from shared.models import Alert, Product, User
+from shared.models import Alert, NotificationDelivery, Product, User
 
 router = APIRouter(prefix="/alerts", tags=["alerts"])
 
@@ -35,6 +35,71 @@ class AlertResponse(BaseModel):
     is_active: bool
     triggered_at: datetime | None = None
     created_at: datetime
+    last_delivery_status: str | None = None
+
+
+def _aggregate_delivery_status(statuses: list[str]) -> str | None:
+    if not statuses:
+        return None
+    unique_statuses = set(statuses)
+    if unique_statuses == {"sent"}:
+        return "sent"
+    if "sent" in unique_statuses:
+        return "partial"
+    if "failed" in unique_statuses:
+        return "failed"
+    return "skipped"
+
+
+def _latest_delivery_status_by_alert(
+    session: Session,
+    alerts: list[Alert],
+) -> dict[int, str | None]:
+    alert_ids = [alert.id for alert in alerts if alert.id is not None]
+    if not alert_ids:
+        return {}
+
+    rows = session.exec(
+        select(NotificationDelivery)
+        .where(NotificationDelivery.alert_id.in_(alert_ids))  # type: ignore[attr-defined]
+        .order_by(
+            NotificationDelivery.created_at.desc(),
+            NotificationDelivery.id.desc(),
+        )
+    ).all()
+
+    latest_group_by_alert: dict[int, str] = {}
+    statuses_by_alert: dict[int, list[str]] = {}
+    for row in rows:
+        if row.alert_id is None:
+            continue
+        latest_group = latest_group_by_alert.setdefault(
+            row.alert_id,
+            row.delivery_group_id,
+        )
+        if row.delivery_group_id == latest_group:
+            statuses_by_alert.setdefault(row.alert_id, []).append(row.status)
+
+    return {
+        alert_id: _aggregate_delivery_status(statuses)
+        for alert_id, statuses in statuses_by_alert.items()
+    }
+
+
+def _alert_response(
+    alert: Alert,
+    last_delivery_status: str | None = None,
+) -> AlertResponse:
+    return AlertResponse(
+        id=alert.id,
+        product_id=alert.product_id,
+        target_price=alert.target_price,
+        currency=alert.currency,
+        is_active=alert.is_active,
+        triggered_at=alert.triggered_at,
+        created_at=alert.created_at,
+        last_delivery_status=last_delivery_status,
+    )
 
 
 @router.get("/", response_model=list[AlertResponse])
@@ -47,7 +112,8 @@ def list_alerts(
     if is_active is not None:
         query = query.where(Alert.is_active == is_active)
     alerts = session.exec(query).all()
-    return alerts
+    statuses = _latest_delivery_status_by_alert(session, list(alerts))
+    return [_alert_response(alert, statuses.get(alert.id)) for alert in alerts]
 
 
 @router.post("/", response_model=AlertResponse, status_code=status.HTTP_201_CREATED)
@@ -78,7 +144,7 @@ def create_alert(data: AlertCreate, current_user: CurrentUser, session: SessionD
     session.add(alert)
     session.commit()
     session.refresh(alert)
-    return alert
+    return _alert_response(alert)
 
 
 @router.patch("/by-product/{product_id}", response_model=AlertResponse)
@@ -119,7 +185,8 @@ def upsert_target_price_by_product(
     session.add(alert)
     session.commit()
     session.refresh(alert)
-    return alert
+    status_by_alert = _latest_delivery_status_by_alert(session, [alert])
+    return _alert_response(alert, status_by_alert.get(alert.id))
 
 
 @router.delete("/{alert_id}", status_code=status.HTTP_204_NO_CONTENT)
@@ -140,4 +207,5 @@ def deactivate_alert(alert_id: int, current_user: CurrentUser, session: SessionD
     session.add(alert)
     session.commit()
     session.refresh(alert)
-    return alert
+    status_by_alert = _latest_delivery_status_by_alert(session, [alert])
+    return _alert_response(alert, status_by_alert.get(alert.id))
